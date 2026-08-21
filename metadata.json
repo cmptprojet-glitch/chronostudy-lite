@@ -1,0 +1,8 @@
+{
+  "name": "Remix ChronoStudy",
+  "description": "Plateforme Full-Stack d\u0027Organisation d\u0027Études, d\u0027Apprentissage Actif (Active Recall, Spaced Repetition) et de Productivité Intelligente avec IA Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
