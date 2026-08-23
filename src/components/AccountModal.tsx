@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
+import { AnimatedIcon } from './AnimatedIcon';
 
 interface AccountModalProps {
   isOpen: boolean;
@@ -319,7 +320,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                           {av.image ? (
                             <img src={av.image} alt={av.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                           ) : (
-                            <span>{av.icon}</span>
+                            <AnimatedIcon type={av.icon || 'star'} className="w-5 h-5" />
                           )}
                         </div>
                         <span className="text-[10px] font-bold truncate w-full">{av.name}</span>

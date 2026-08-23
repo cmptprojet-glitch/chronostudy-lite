@@ -20,6 +20,8 @@ import {
   Zap,
   Target,
   Info,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { AmbientAudioPlayer } from './AmbientAudioPlayer';
@@ -48,6 +50,7 @@ export const PomodoroView: React.FC<PomodoroViewProps> = ({
   const [phase, setPhase] = useState<'work' | 'shortBreak' | 'longBreak'>('work');
   const [timeLeft, setTimeLeft] = useState(workMinutes * 60);
   const [isRunning, setIsRunning] = useState(false);
+  const [isZenMode, setIsZenMode] = useState(false);
   const [attachedTaskId, setAttachedTaskId] = useState<string | undefined>(selectedTaskId);
   const [attachedSubject, setAttachedSubject] = useState<string>('Mathématiques');
 
@@ -266,8 +269,18 @@ export const PomodoroView: React.FC<PomodoroViewProps> = ({
           </div>
         </div>
 
-        {/* LIVE XP REWARD COUNTER BADGE */}
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* LIVE XP REWARD COUNTER BADGE & ZEN MODE BUTTON */}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setIsZenMode(true)}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-[#161922] dark:text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
+            title="Activer le mode plein écran immersif sans distraction"
+          >
+            <Maximize2 className="w-4 h-4 text-emerald-500" />
+            <span>Mode Zen Focus</span>
+          </button>
+
           <div
             style={{ backgroundColor: currentTheme.accentSubtle, color: currentTheme.accentSubtleText, borderColor: `${currentTheme.accentColor}66` }}
             className="border px-4 py-2 rounded-2xl flex items-center gap-2 shadow-xs"
@@ -386,8 +399,20 @@ export const PomodoroView: React.FC<PomodoroViewProps> = ({
             )}
           </div>
 
-          {/* TIMER DISPLAY RING */}
+          {/* TIMER DISPLAY RING WITH ROTATING NEEDLE ANIMATION */}
           <div className="relative w-64 h-64 my-4 flex items-center justify-center">
+            {/* Smoothly Rotating Clock Needle Hand */}
+            {isRunning && (
+              <div className="absolute inset-4 pointer-events-none flex items-center justify-center">
+                <div className="w-full h-full relative animate-spin-slow">
+                  <div
+                    style={{ backgroundColor: currentTheme.accentColor }}
+                    className="w-1 h-20 rounded-full mx-auto shadow-md"
+                  />
+                </div>
+              </div>
+            )}
+
             <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
               <path
                 className="text-slate-100 dark:text-zinc-800"
@@ -586,6 +611,117 @@ export const PomodoroView: React.FC<PomodoroViewProps> = ({
                 Passer sans XP
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* ZEN FOCUS MODE IMMERSIVE FULLSCREEN OVERLAY */}
+      {isZenMode && (
+        <div className="fixed inset-0 z-50 bg-[#0B0D13] text-white flex flex-col items-center justify-between p-6 sm:p-12 select-none animate-in fade-in duration-300">
+          {/* TOP BAR */}
+          <div className="w-full max-w-4xl flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div
+                style={{ backgroundColor: currentTheme.accentColor, color: currentTheme.accentTextColor }}
+                className="w-9 h-9 rounded-xl flex items-center justify-center font-black"
+              >
+                ⚡
+              </div>
+              <div>
+                <h3 className="font-extrabold text-sm text-white">
+                  Mode Zen Immersion Totale
+                </h3>
+                <p className="text-[11px] text-zinc-400 font-medium">
+                  {attachedSubject} {attachedTaskId ? `• ${tasks.find((t) => t.id === attachedTaskId)?.title}` : ''}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsZenMode(false)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-bold transition-all cursor-pointer"
+            >
+              <Minimize2 className="w-4 h-4" />
+              <span>Quitter le mode Zen</span>
+            </button>
+          </div>
+
+          {/* CENTER CIRCULAR CLOCK */}
+          <div className="flex flex-col items-center justify-center space-y-6 my-auto">
+            <div className="relative w-80 h-80 flex items-center justify-center">
+              <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                <path
+                  className="text-zinc-800/80"
+                  strokeWidth="2"
+                  stroke="currentColor"
+                  fill="none"
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+                <path
+                  stroke={currentTheme.accentColor}
+                  className="transition-all duration-1000 ease-linear"
+                  strokeDasharray={`${progressPercent}, 100`}
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  fill="none"
+                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                />
+              </svg>
+
+              <div className="absolute flex flex-col items-center">
+                <span className="text-7xl font-black text-white tracking-tighter font-mono">
+                  {formatTime(timeLeft)}
+                </span>
+                <span
+                  style={{ color: currentTheme.accentColor }}
+                  className="text-sm font-extrabold uppercase tracking-widest mt-3"
+                >
+                  {phase === 'work' ? 'Deep Focus' : 'Pause Récupération'}
+                </span>
+                {phase === 'work' && (
+                  <span className={`text-xs font-bold mt-2 ${hasMetThreshold ? 'text-emerald-400' : 'text-zinc-400'}`}>
+                    {hasMetThreshold ? '✓ Seuil 4/5 Validé' : `Écoulé : ${formatTime(elapsedSeconds)} / ${workMinutes}m`}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* CONTROLS */}
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={handleReset}
+                title="Réinitialiser"
+                className="p-4 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-2xl transition-all cursor-pointer"
+              >
+                <RotateCcw className="w-5 h-5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleStartPause}
+                style={{ backgroundColor: currentTheme.accentColor, color: currentTheme.accentTextColor }}
+                className="px-10 py-4 rounded-2xl font-black text-sm shadow-xl transition-all flex items-center gap-2.5 cursor-pointer hover:scale-105 active:scale-95 hover:opacity-95"
+              >
+                {isRunning ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
+                <span>{isRunning ? 'Pause' : 'Démarrer Focus'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleAttemptSkipOrComplete}
+                title="Valider / Passer à l'étape suivante"
+                className="p-4 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-2xl transition-all cursor-pointer"
+              >
+                <SkipForward className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* BOTTOM AMBIENCE & HINT */}
+          <div className="w-full max-w-4xl flex items-center justify-between text-xs text-zinc-500 font-medium pt-4 border-t border-zinc-900">
+            <span>Conseil : Isolez-vous des notifications pour une rétention mnésique optimale.</span>
+            <span className="font-bold text-zinc-400">Objectif : +{potentialFullXP} XP</span>
           </div>
         </div>
       )}

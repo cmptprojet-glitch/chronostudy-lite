@@ -11,7 +11,6 @@ export type TabType =
   | 'pomodoro'
   | 'tasks'
   | 'documents'
-  | 'ai_tutor'
   | 'study_groups'
   | 'trash';
 
@@ -31,7 +30,6 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, onQuick
     { id: 'tasks', label: 'Assignments', icon: <CheckSquare className="w-4 h-4" /> },
     { id: 'documents', label: 'Docs IA', icon: <FileText className="w-4 h-4" /> },
     { id: 'analytics', label: 'Reports', icon: <BarChart3 className="w-4 h-4" /> },
-    { id: 'ai_tutor', label: 'AI Tutor', icon: <Bot className="w-4 h-4" /> },
   ];
 
   return (

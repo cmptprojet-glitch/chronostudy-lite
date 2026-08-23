@@ -4,8 +4,10 @@ import {
   CourseChapter,
   CourseDocumentItem,
   FlashcardDeck,
+  StudyDocument,
 } from '../types';
 import { OFFICIAL_CURRICULUM_OPTIONS } from '../data/initialData';
+import { AnimatedIcon } from './AnimatedIcon';
 import {
   BookOpen,
   FolderPlus,
@@ -17,7 +19,6 @@ import {
   Music,
   CheckCircle2,
   Trash2,
-  MoreVertical,
   Download,
   Eye,
   Search,
@@ -30,13 +31,18 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  Bot,
+  Zap,
+  RefreshCw,
+  FileCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { AddToCourseModal } from './AddToCourseModal';
 
 interface SubjectsCoursesViewProps {
   subjects: AcademicSubject[];
   decks: FlashcardDeck[];
+  documents?: StudyDocument[];
+  onAddDocument?: (doc: StudyDocument) => void;
   onUpdateSubjects: (updatedSubjects: AcademicSubject[]) => void;
   onSelectDeckForStudy?: (deck: FlashcardDeck) => void;
   onSoftDeleteItem: (item: {
@@ -53,6 +59,8 @@ interface SubjectsCoursesViewProps {
 export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
   subjects,
   decks,
+  documents = [],
+  onAddDocument,
   onUpdateSubjects,
   onSelectDeckForStudy,
   onSoftDeleteItem,
@@ -72,12 +80,27 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
   const [newChapterTitle, setNewChapterTitle] = useState('');
   const [newChapterDesc, setNewChapterDesc] = useState('');
 
-  // Import course form
+  // Import course form & modes: 'local_file' | 'hub_documents' | 'ai_generate'
+  const [importMode, setImportMode] = useState<'local_file' | 'hub_documents' | 'ai_generate'>('hub_documents');
   const [importedTitle, setImportedTitle] = useState('');
   const [importedContent, setImportedContent] = useState('');
   const [importedType, setImportedType] = useState<CourseDocumentItem['type']>('text');
   const [importedTargetChapter, setImportedTargetChapter] = useState<string>('');
   const [importedFileName, setImportedFileName] = useState('');
+  const [hubSearchQuery, setHubSearchQuery] = useState('');
+  const [selectedHubDocId, setSelectedHubDocId] = useState<string | null>(null);
+
+  // AI Course Generator
+  const [aiPromptText, setAiPromptText] = useState('');
+  const [aiEducationLevel, setAiEducationLevel] = useState('Lycée / Université');
+  const [isAiGenerating, setIsAiGenerating] = useState(false);
+  const [aiGeneratedPreview, setAiGeneratedPreview] = useState<{
+    title: string;
+    content: string;
+    summary: string;
+    keyConcepts: string[];
+    suggestedChapter?: string;
+  } | null>(null);
 
   // Current Subject
   const currentSubject = subjects.find((s) => s.id === selectedSubjectId) || subjects[0];
@@ -96,12 +119,10 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
   const handleToggleSubjectFromCurriculum = (curriculumItem: typeof OFFICIAL_CURRICULUM_OPTIONS[0]) => {
     const existingIndex = subjects.findIndex((s) => s.name === curriculumItem.name);
     if (existingIndex >= 0) {
-      // Toggle enabled
       const updated = [...subjects];
       updated[existingIndex].enabled = !updated[existingIndex].enabled;
       onUpdateSubjects(updated);
     } else {
-      // Add new subject
       const newSub: AcademicSubject = {
         id: `sub-${Date.now()}`,
         name: curriculumItem.name,
@@ -185,6 +206,85 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
     reader.readAsText(file);
   };
 
+  // Handle import from Hub Documents selection
+  const handleSelectDocFromHub = (doc: StudyDocument) => {
+    setSelectedHubDocId(doc.id);
+    setImportedTitle(doc.name.replace(/\.[^/.]+$/, ''));
+    setImportedContent(
+      doc.content ||
+        `# ${doc.name}\n\n${doc.aiAnalysis?.summary || ''}\n\nConcepts clés:\n${doc.aiAnalysis?.keyConcepts?.join('\n- ') || ''}`
+    );
+    setImportedFileName(doc.name);
+    setImportedType(
+      doc.fileCategory === 'audio'
+        ? 'audio'
+        : doc.fileCategory === 'pdf'
+        ? 'pdf'
+        : doc.fileCategory === 'ia_generated'
+        ? 'ia_summary'
+        : 'text'
+    );
+  };
+
+  // Handle AI Course Generation
+  const handleGenerateCourseWithAI = async () => {
+    if (!aiPromptText.trim()) return;
+    setIsAiGenerating(true);
+    try {
+      const res = await fetch('/api/gemini/generate-study-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: currentSubject.name,
+          promptText: aiPromptText,
+          fileType: 'text',
+          level: aiEducationLevel,
+        }),
+      });
+      const data = await res.json();
+      if (data && data.title) {
+        setAiGeneratedPreview({
+          title: data.title,
+          content: data.content,
+          summary: data.summary,
+          keyConcepts: data.keyConcepts || [],
+          suggestedChapter: data.suggestedChapter,
+        });
+        setImportedTitle(data.title);
+        setImportedContent(data.content);
+        setImportedFileName(data.fileName || `${data.title}.md`);
+        setImportedType('ia_summary');
+
+        // Also add to global Hub Documents if callback available
+        if (onAddDocument) {
+          const newHubDoc: StudyDocument = {
+            id: `doc-hub-${Date.now()}`,
+            name: data.fileName || `${data.title}.md`,
+            size: data.content?.length || 2048,
+            type: 'text/markdown',
+            uploadDate: new Date().toISOString(),
+            fileCategory: 'ia_generated',
+            content: data.content || '',
+            subject: currentSubject.name,
+            isAiGenerated: true,
+            aiAnalysis: {
+              summary: data.summary || '',
+              keyConcepts: data.keyConcepts || [],
+              formulasAndDefs: [],
+              studySuggestions: [],
+              generatedAt: new Date().toISOString(),
+            },
+          };
+          onAddDocument(newHubDoc);
+        }
+      }
+    } catch (err) {
+      console.error('Error generating course with AI:', err);
+    } finally {
+      setIsAiGenerating(false);
+    }
+  };
+
   // Handle submit imported course
   const handleSaveImportedCourse = () => {
     if (!importedTitle.trim() || !currentSubject) return;
@@ -226,6 +326,9 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
     setImportedTitle('');
     setImportedContent('');
     setImportedFileName('');
+    setAiGeneratedPreview(null);
+    setAiPromptText('');
+    setSelectedHubDocId(null);
   };
 
   // Toggle chapter completion
@@ -289,6 +392,11 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
       activeChapter?.deckIds?.includes(d.id)
   );
 
+  const filteredHubDocs = documents.filter((d) =>
+    d.name.toLowerCase().includes(hubSearchQuery.toLowerCase()) ||
+    (d.aiAnalysis?.summary && d.aiAnalysis.summary.toLowerCase().includes(hubSearchQuery.toLowerCase()))
+  );
+
   return (
     <div className="space-y-6 pb-24 max-w-7xl mx-auto font-sans">
       {/* HEADER SECTION */}
@@ -298,15 +406,15 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
         className="bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-slate-100 dark:border-zinc-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
       >
         <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-[#D4F94E] text-[#161922] flex items-center justify-center font-black shadow-md text-xl">
-            🎓
+          <div className="w-12 h-12 rounded-2xl bg-[#D4F94E] text-[#161922] flex items-center justify-center font-black shadow-md">
+            <AnimatedIcon type="graduation" className="w-6 h-6 text-[#161922]" />
           </div>
           <div>
             <h2 className="text-xl sm:text-2xl font-black text-[#161922] dark:text-white tracking-tight">
               Matières & Cours par Chapitres
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium">
-              Organisation thématique officielle du cursus • Cours, fiches, decks & synthèses audio
+              Organisation thématique officielle du cursus • Hub Documents, fiches IA, decks & synthèses audio
             </p>
           </div>
         </div>
@@ -329,7 +437,7 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
             className="px-4 py-2.5 bg-[#D4F94E] text-[#161922] hover:bg-[#CBF33B] rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer shadow-xs"
           >
             <Upload className="w-4 h-4" />
-            <span>Importer un cours</span>
+            <span>Importer un cours (Hub & IA)</span>
           </button>
         </div>
       </motion.div>
@@ -511,7 +619,7 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
               <div className="bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-slate-100 dark:border-zinc-800 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
                   <h4 className="font-extrabold text-base text-[#161922] dark:text-white flex items-center gap-2">
-                    <FileText className="w-5 h-5 text-blue-500" />
+                    <AnimatedIcon type="document" className="w-5 h-5 text-blue-500" />
                     <span>Fiches de Cours & Documents ({activeChapter.documents.length})</span>
                   </h4>
 
@@ -522,7 +630,7 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
                     }}
                     className="px-3.5 py-1.5 bg-[#EFFDE2] dark:bg-zinc-800 text-[#65A30D] dark:text-[#D4F94E] hover:bg-[#D4F94E] hover:text-[#161922] rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer"
                   >
-                    <Plus className="w-3.5 h-3.5" /> Importer un document
+                    <Plus className="w-3.5 h-3.5" /> Importer (Hub / IA)
                   </button>
                 </div>
 
@@ -541,7 +649,7 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
                       }}
                       className="px-4 py-2 bg-[#D4F94E] text-[#161922] font-black text-xs rounded-xl cursor-pointer"
                     >
-                      + Importer ou rédiger une fiche
+                      + Importer depuis Hub Documents ou IA
                     </button>
                   </div>
                 ) : (
@@ -559,10 +667,12 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
                                   ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300'
                                   : doc.type === 'pdf'
                                   ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300'
+                                  : doc.type === 'ia_summary'
+                                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
                                   : 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
                               }`}
                             >
-                              {doc.type}
+                              {doc.type === 'ia_summary' ? '✨ IA SYNTHÈSE' : doc.type}
                             </span>
                             <span className="text-[10px] text-slate-400 font-semibold">{doc.addedAt}</span>
                           </div>
@@ -612,7 +722,7 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
               <div className="bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-slate-100 dark:border-zinc-800 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
                   <h4 className="font-extrabold text-base text-[#161922] dark:text-white flex items-center gap-2">
-                    <Layers className="w-5 h-5 text-purple-500" />
+                    <AnimatedIcon type="layers" className="w-5 h-5 text-purple-500" />
                     <span>Decks Flashcards Associés ({subjectDecks.length})</span>
                   </h4>
                 </div>
@@ -795,42 +905,80 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
         </div>
       )}
 
-      {/* MODAL: IMPORTER UN COURS / FICHE */}
+      {/* ═════════════════════════════════════════════════════════════════════════ */}
+      {/* MODAL: IMPORTER UN COURS (3 MODES: LOCAL FILE, HUB DOCUMENTS, IA GEMINI) */}
+      {/* ═════════════════════════════════════════════════════════════════════════ */}
       {showImportCourseModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-zinc-800">
-              <h3 className="font-extrabold text-lg text-[#161922] dark:text-white">
-                Importer un cours dans {currentSubject.name}
-              </h3>
-              <button onClick={() => setShowImportCourseModal(false)} className="text-slate-400 hover:text-white">
+          <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-3xl p-6 max-w-xl w-full shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+            {/* MODAL HEADER */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-zinc-800">
+              <div>
+                <h3 className="font-extrabold text-base sm:text-lg text-[#161922] dark:text-white">
+                  Importer un cours • {currentSubject.name}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Choisissez la source d'importation vers votre chapitre
+                </p>
+              </div>
+              <button onClick={() => setShowImportCourseModal(false)} className="text-slate-400 hover:text-white cursor-pointer">
                 ✕
               </button>
             </div>
 
-            <div className="space-y-3 flex-1 overflow-y-auto pr-1">
-              {/* File upload zone */}
-              <div className="border-2 border-dashed border-slate-200 dark:border-zinc-700 rounded-2xl p-4 text-center hover:border-[#D4F94E] transition-colors relative cursor-pointer">
-                <input
-                  type="file"
-                  accept=".txt,.md,.pdf,.json,.doc,.docx"
-                  onChange={handleFileUpload}
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                />
-                <Upload className="w-6 h-6 mx-auto mb-1 text-slate-400" />
-                <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  {importedFileName ? `Fichier : ${importedFileName}` : 'Glissez-déposez un fichier de cours (.txt, .md, .pdf)'}
-                </p>
-              </div>
+            {/* 3 IMPORT SOURCE TABS */}
+            <div className="grid grid-cols-3 gap-1 bg-slate-100 dark:bg-zinc-800 p-1 rounded-2xl text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setImportMode('hub_documents')}
+                className={`py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  importMode === 'hub_documents'
+                    ? 'bg-white dark:bg-zinc-900 text-[#161922] dark:text-white font-black shadow-xs'
+                    : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                <Folder className="w-3.5 h-3.5 text-blue-500" />
+                <span>Hub Documents ({documents.length})</span>
+              </button>
 
+              <button
+                type="button"
+                onClick={() => setImportMode('ai_generate')}
+                className={`py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  importMode === 'ai_generate'
+                    ? 'bg-[#D4F94E] text-[#161922] font-black shadow-xs'
+                    : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-[#65A30D] dark:text-[#161922]" />
+                <span>Générer avec l'IA</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setImportMode('local_file')}
+                className={`py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  importMode === 'local_file'
+                    ? 'bg-white dark:bg-zinc-900 text-[#161922] dark:text-white font-black shadow-xs'
+                    : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Fichier Local</span>
+              </button>
+            </div>
+
+            {/* MODAL BODY CONTENT */}
+            <div className="space-y-4 flex-1 overflow-y-auto pr-1">
+              {/* TARGET CHAPTER SELECTOR (ALWAYS VISIBLE) */}
               <div>
                 <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
-                  Chapitre de destination :
+                  Chapitre de destination dans {currentSubject.name} :
                 </label>
                 <select
                   value={importedTargetChapter || activeChapter?.id || ''}
                   onChange={(e) => setImportedTargetChapter(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-2xl text-xs font-medium text-slate-800 dark:text-white"
+                  className="w-full px-3 py-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-2xl text-xs font-bold text-slate-800 dark:text-white outline-none cursor-pointer"
                 >
                   {chapters.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -840,6 +988,148 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
                 </select>
               </div>
 
+              {/* MODE 1: IMPORT FROM HUB DOCUMENTS */}
+              {importMode === 'hub_documents' && (
+                <div className="space-y-3">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Rechercher dans le Hub Documents..."
+                      value={hubSearchQuery}
+                      onChange={(e) => setHubSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs text-slate-800 dark:text-white outline-none"
+                    />
+                  </div>
+
+                  {documents.length === 0 ? (
+                    <p className="text-center text-xs text-slate-400 py-6 font-medium">
+                      Aucun document dans le Hub. Vous pouvez en générer un avec l'IA ou importer un fichier local.
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                      {filteredHubDocs.map((doc) => {
+                        const isSelected = selectedHubDocId === doc.id;
+                        return (
+                          <div
+                            key={doc.id}
+                            onClick={() => handleSelectDocFromHub(doc)}
+                            className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
+                              isSelected
+                                ? 'border-[#161922] dark:border-[#D4F94E] bg-[#EFFDE2] dark:bg-zinc-800 shadow-xs'
+                                : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 hover:bg-slate-50 dark:hover:bg-zinc-800/60'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                                <FileText className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-black text-[#161922] dark:text-white truncate">
+                                  {doc.name}
+                                </p>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                                  {Math.round(doc.size / 1024)} KB • {(doc.fileCategory || 'document').toUpperCase()} {doc.aiAnalysis?.summary && `• ${doc.aiAnalysis.summary.slice(0, 45)}...`}
+                                </p>
+                              </div>
+                            </div>
+
+                            {isSelected && (
+                              <span className="w-5 h-5 rounded-full bg-[#D4F94E] text-[#161922] flex items-center justify-center font-black text-xs shrink-0">
+                                ✓
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* MODE 2: GENERATE WITH GEMINI AI */}
+              {importMode === 'ai_generate' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
+                      Sujet ou notion du cours à rédiger :
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Les lois de Newton et dynamique des solides, ou Les figures de style au Bac"
+                      value={aiPromptText}
+                      onChange={(e) => setAiPromptText(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-2xl text-xs font-medium text-slate-800 dark:text-white outline-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Niveau d'étude</label>
+                      <select
+                        value={aiEducationLevel}
+                        onChange={(e) => setAiEducationLevel(e.target.value)}
+                        className="w-full p-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-bold text-[#161922] dark:text-white outline-none"
+                      >
+                        <option value="Collège">Collège (Brevet)</option>
+                        <option value="Lycée">Lycée (Baccalauréat)</option>
+                        <option value="Prépa / Université">Prépa & Université (Licence/Master)</option>
+                        <option value="Grand Concours">Concours & Médecine</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        disabled={isAiGenerating || !aiPromptText.trim()}
+                        onClick={handleGenerateCourseWithAI}
+                        className="w-full py-2.5 bg-[#D4F94E] hover:bg-[#CBF33B] text-[#161922] rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 cursor-pointer shadow-xs"
+                      >
+                        {isAiGenerating ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Rédacteur IA actif...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5" /> Rédiger la Fiche IA
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {aiGeneratedPreview && (
+                    <div className="p-3 bg-emerald-50 dark:bg-zinc-800/80 rounded-2xl border border-emerald-300 dark:border-emerald-700 text-xs space-y-1.5 animate-in fade-in">
+                      <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-black">
+                        <FileCheck className="w-4 h-4" /> Cours IA Généré : {aiGeneratedPreview.title}
+                      </div>
+                      <p className="text-slate-600 dark:text-slate-300 text-[11px]">
+                        {aiGeneratedPreview.summary}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* MODE 3: LOCAL FILE UPLOAD */}
+              {importMode === 'local_file' && (
+                <div className="space-y-3">
+                  <div className="border-2 border-dashed border-slate-200 dark:border-zinc-700 rounded-2xl p-4 text-center hover:border-[#D4F94E] transition-colors relative cursor-pointer">
+                    <input
+                      type="file"
+                      accept=".txt,.md,.pdf,.json,.doc,.docx"
+                      onChange={handleFileUpload}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    />
+                    <Upload className="w-6 h-6 mx-auto mb-1 text-slate-400" />
+                    <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      {importedFileName ? `Fichier : ${importedFileName}` : 'Glissez-déposez un fichier de cours (.txt, .md, .pdf)'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* TITLE & CONTENT PREVIEW */}
               <div>
                 <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
                   Titre du cours / Fiche :
@@ -858,8 +1148,8 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
                   Contenu texte / Markdown du cours :
                 </label>
                 <textarea
-                  rows={5}
-                  placeholder="Collez ou rédigez les notes de cours ici..."
+                  rows={4}
+                  placeholder="Collez ou vérifiez les notes de cours ici..."
                   value={importedContent}
                   onChange={(e) => setImportedContent(e.target.value)}
                   className="w-full px-3.5 py-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-2xl text-xs font-mono text-slate-800 dark:text-white"
@@ -867,17 +1157,20 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
               </div>
             </div>
 
+            {/* MODAL FOOTER */}
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800">
               <button
+                type="button"
                 onClick={() => setShowImportCourseModal(false)}
-                className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold"
+                className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
               >
                 Annuler
               </button>
               <button
+                type="button"
                 onClick={handleSaveImportedCourse}
                 disabled={!importedTitle.trim()}
-                className="px-5 py-2 bg-[#D4F94E] text-[#161922] font-black rounded-xl text-xs disabled:opacity-40"
+                className="px-5 py-2 bg-[#D4F94E] text-[#161922] font-black rounded-xl text-xs disabled:opacity-40 cursor-pointer shadow-xs"
               >
                 Enregistrer le cours
               </button>
@@ -895,7 +1188,7 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
                 <h3 className="font-extrabold text-lg text-[#161922] dark:text-white">{showReaderDoc.title}</h3>
                 <p className="text-xs text-slate-500 font-semibold">{showReaderDoc.addedAt} • {showReaderDoc.type.toUpperCase()}</p>
               </div>
-              <button onClick={() => setShowReaderDoc(null)} className="p-2 text-slate-400 hover:text-white">
+              <button onClick={() => setShowReaderDoc(null)} className="p-2 text-slate-400 hover:text-white cursor-pointer">
                 ✕
               </button>
             </div>
@@ -907,7 +1200,7 @@ export const SubjectsCoursesView: React.FC<SubjectsCoursesViewProps> = ({
             <div className="flex justify-end pt-2">
               <button
                 onClick={() => setShowReaderDoc(null)}
-                className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-white rounded-xl text-xs font-bold"
+                className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-white rounded-xl text-xs font-bold cursor-pointer"
               >
                 Fermer
               </button>

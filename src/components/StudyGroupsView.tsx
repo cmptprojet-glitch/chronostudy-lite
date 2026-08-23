@@ -37,6 +37,8 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { SmoothCarousel } from './SmoothCarousel';
+import { TopMedal } from './AnimatedMedal';
+import { AnimatedIcon } from './AnimatedIcon';
 
 interface StudyGroupsViewProps {
   groups: StudyGroup[];
@@ -617,10 +619,9 @@ export const StudyGroupsView: React.FC<StudyGroupsViewProps> = ({
                                     <div className="flex items-center gap-3">
                                       {/* MEDAL BADGE */}
                                       <div className="w-8 h-8 rounded-xl flex items-center justify-center font-black text-sm shrink-0">
-                                        {index === 0 && <span className="text-2xl">🥇</span>}
-                                        {index === 1 && <span className="text-2xl">🥈</span>}
-                                        {index === 2 && <span className="text-2xl">🥉</span>}
-                                        {index > 2 && (
+                                        {index < 3 ? (
+                                          <TopMedal rank={index + 1} size="sm" />
+                                        ) : (
                                           <span className="text-xs font-black text-slate-400">#{index + 1}</span>
                                         )}
                                       </div>
@@ -1126,25 +1127,26 @@ export const StudyGroupsView: React.FC<StudyGroupsViewProps> = ({
                     >
                       {/* BADGE */}
                       <div className="flex justify-center -mt-2 mb-1">
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-black flex items-center gap-1 shadow-xs ${
-                            isFirst
-                              ? 'bg-[#D4F94E] text-[#161922]'
-                              : isSecond
-                              ? 'bg-slate-200 dark:bg-zinc-700 text-[#161922] dark:text-white'
-                              : isThird
-                              ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300'
-                              : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-slate-300 text-[10px]'
-                          }`}
-                        >
-                          {isFirst
-                            ? '👑 1ère Place'
-                            : isSecond
-                            ? '🥈 2ème Place'
-                            : isThird
-                            ? '🥉 3ème Place'
-                            : `⚡ #${index + 1} Challenger`}
-                        </span>
+                        {isFirst ? (
+                          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#D4F94E] text-[#161922] text-xs font-black shadow-xs">
+                            <TopMedal rank={1} size="sm" showCrown={false} className="w-5 h-5" />
+                            <span>1ère Place (Or)</span>
+                          </div>
+                        ) : isSecond ? (
+                          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-200 dark:bg-zinc-700 text-[#161922] dark:text-white text-xs font-black shadow-xs">
+                            <TopMedal rank={2} size="sm" className="w-5 h-5" />
+                            <span>2ème Place (Argent)</span>
+                          </div>
+                        ) : isThird ? (
+                          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 text-xs font-black shadow-xs">
+                            <TopMedal rank={3} size="sm" className="w-5 h-5" />
+                            <span>3ème Place (Bronze)</span>
+                          </div>
+                        ) : (
+                          <span className="px-3 py-1 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-slate-300 text-[10px] font-black">
+                            #{index + 1} Challenger
+                          </span>
+                        )}
                       </div>
 
                       {/* AVATAR & NAME */}

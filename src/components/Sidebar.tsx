@@ -21,6 +21,7 @@ import {
 import { UserSettings, DEFAULT_USER_SETTINGS } from '../types';
 import { calculateLevel, XP_RATES } from '../utils/gamification';
 import { useLanguage } from '../context/LanguageContext';
+import { AnimatedIcon } from './AnimatedIcon';
 
 interface SidebarProps {
   activeTab: TabType;
@@ -81,7 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className={`flex items-center ${isCollapsed ? 'justify-center flex-col gap-2 pt-1' : 'justify-between px-1 pt-1 gap-1.5'}`}>
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="sidebar-logo-box w-8 h-8 bg-[#D4F94E] text-[#161922] rounded-xl flex items-center justify-center font-black shadow-md shrink-0">
-              <span className="text-sm font-black tracking-tighter">⚡</span>
+              <AnimatedIcon type="zap" size={16} className="text-[#161922]" />
             </div>
             {!isCollapsed && (
               <div className="min-w-0">
@@ -93,48 +94,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
           </div>
 
-          {/* QUICK ACTION BUTTONS & COLLAPSE ARROW */}
-          <div className="flex items-center gap-1 shrink-0 bg-zinc-900/90 p-1 rounded-xl border border-zinc-800">
+          {/* COLLAPSE ARROW & TOGGLE */}
+          {onToggleCollapse && (
             <button
               type="button"
-              onClick={toggleLanguage}
-              title={language === 'fr' ? 'Passer en Anglais' : 'Switch to French'}
-              className="px-1.5 h-6.5 flex items-center justify-center text-[10px] font-black text-[#D4F94E] hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+              onClick={onToggleCollapse}
+              title={isCollapsed ? 'Déplier la barre latérale' : 'Replier la barre latérale'}
+              className="p-1.5 text-zinc-400 hover:text-[#D4F94E] hover:bg-zinc-800 rounded-xl transition-all cursor-pointer shadow-xs"
             >
-              {language === 'fr' ? 'FR' : 'EN'}
+              {isCollapsed ? <ChevronRight className="w-4 h-4 text-[#D4F94E]" /> : <ChevronLeft className="w-4 h-4" />}
             </button>
-            {onOpenWorldClock && !isCollapsed && (
-              <button
-                type="button"
-                onClick={onOpenWorldClock}
-                title="Horloge & Fuseaux"
-                className="w-6.5 h-6.5 flex items-center justify-center text-zinc-400 hover:text-[#D4F94E] hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-              >
-                <Clock className="w-3.5 h-3.5" />
-              </button>
-            )}
-            {onOpenAccountModal && !isCollapsed && (
-              <button
-                type="button"
-                onClick={onOpenAccountModal}
-                title="Paramètres de compte & Thèmes"
-                className="w-6.5 h-6.5 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-              >
-                <Settings className="w-3.5 h-3.5" />
-              </button>
-            )}
-            {/* COLLAPSE / EXPAND SIDEBAR ARROW BUTTON */}
-            {onToggleCollapse && (
-              <button
-                type="button"
-                onClick={onToggleCollapse}
-                title={isCollapsed ? 'Déplier la barre latérale' : 'Replier la barre latérale'}
-                className="w-6.5 h-6.5 flex items-center justify-center text-zinc-300 hover:text-[#D4F94E] bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-all cursor-pointer shadow-xs"
-              >
-                {isCollapsed ? <ChevronRight className="w-4 h-4 text-[#D4F94E]" /> : <ChevronLeft className="w-4 h-4" />}
-              </button>
-            )}
-          </div>
+          )}
         </div>
 
         {/* NAVIGATION LIST WITH LARGER TYPOGRAPHY (text-sm & font-extrabold) */}

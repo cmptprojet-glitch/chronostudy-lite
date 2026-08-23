@@ -423,3 +423,45 @@ export interface WorldClockCity {
   isPrimary?: boolean;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// DASHBOARD AI CONVERSATION HISTORY TYPES
+// ══════════════════════════════════════════════════════════════════════════════
+export interface AIConversationItem {
+  id: string;
+  query: string;
+  answer: string;
+  mode: 'coach' | 'solve' | 'exam' | 'chat';
+  timestamp: string;
+  createdAt: string;
+  subject?: string;
+  steps?: string[];
+  attachments?: { name: string; type: 'image' | 'file'; url?: string }[];
+  flashcardsGenerated?: { front: string; back: string }[];
+  isBookmarked?: boolean;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NOVA AI PERSONALIZATION & VERIFIED REVISION PLAN TYPES
+// ══════════════════════════════════════════════════════════════════════════════
+export interface NovaPersonalizationConfig {
+  respondLikeTeacher: boolean;
+  schoolGrade: string;
+  country: string;
+  drawStudentExamples: boolean;
+  adaptLearningPace: boolean;
+  targetAverage?: number;
+  ambiance: 'sympa' | 'detendu' | 'coach' | 'direct';
+  warmth: 'neutre' | 'equilibre' | 'chaleureux';
+  emojis: 'aucun' | 'modere' | 'expressif';
+}
+
+export interface RevisionPlanWizardData {
+  goal: 'quick_quiz' | 'test' | 'final_exam' | 'review';
+  targetGrade: number;
+  currentGrade: number;
+  subjects: string[];
+  examDate?: string;
+  attachments?: string[];
+}
+
+

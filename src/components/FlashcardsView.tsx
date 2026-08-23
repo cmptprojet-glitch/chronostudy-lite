@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { FlashcardDeck, Flashcard, DeckAttachedFile } from '../types';
-import { Layers, Plus, RotateCw, CheckCircle2, Sparkles, BookOpen, Trash2, Edit3, X, ArrowLeft, Volume2, Check, Brain, ChevronRight, Paperclip, FileText, Download } from 'lucide-react';
+import { Layers, Plus, RotateCw, CheckCircle2, Sparkles, BookOpen, Trash2, Edit3, X, ArrowLeft, Volume2, Check, Brain, ChevronRight, Paperclip, FileText, Download, Upload, Share2, Copy, FileDown } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { XP_RATES } from '../utils/gamification';
 import { SmoothCarousel } from './SmoothCarousel';
@@ -34,6 +34,14 @@ export const FlashcardsView: React.FC<FlashcardsViewProps> = ({
   const [showAddDeckModal, setShowAddDeckModal] = useState<boolean>(false);
   const [showAddCardModal, setShowAddCardModal] = useState<boolean>(false);
   const [showAiGenModal, setShowAiGenModal] = useState<boolean>(false);
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
+  const [copiedNotification, setCopiedNotification] = useState<string | null>(null);
+
+  // Import State
+  const [importText, setImportText] = useState('');
+  const [importTitle, setImportTitle] = useState('');
+  const [importSubject, setImportSubject] = useState('Mathématiques');
 
   // Forms
   const [newDeckTitle, setNewDeckTitle] = useState('');
@@ -230,6 +238,145 @@ export const FlashcardsView: React.FC<FlashcardsViewProps> = ({
     }
   };
 
+  // Export handlers
+  const handleDownloadDeckJson = (deck: FlashcardDeck) => {
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(deck, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', dataStr);
+    downloadAnchor.setAttribute('download', `${deck.title.toLowerCase().replace(/\s+/g, '_')}_deck.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleCopyMarkdown = (deck: FlashcardDeck) => {
+    const md = deck.cards
+      .map((c, i) => `### Carte ${i + 1}\n**Q:** ${c.question}\n**R:** ${c.answer}\n`)
+      .join('\n');
+    navigator.clipboard.writeText(`# ${deck.title} (${deck.subject})\n\n${md}`);
+    setCopiedNotification('Contenu copié en Markdown dans le presse-papier !');
+    setTimeout(() => setCopiedNotification(null), 3000);
+  };
+
+  // Import handler (Supports JSON and Markdown / Text pairs)
+  const handleExecuteImport = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importText.trim()) return;
+
+    try {
+      // Check if it's raw JSON
+      if (importText.trim().startsWith('{')) {
+        const parsed = JSON.parse(importText);
+        if (parsed.cards && Array.isArray(parsed.cards)) {
+          const importedDeck: FlashcardDeck = {
+            id: `deck-import-${Date.now()}`,
+            title: parsed.title || importTitle || 'Deck Importé',
+            subject: parsed.subject || importSubject || 'Mathématiques',
+            description: parsed.description || 'Deck importé via JSON',
+            color: '#D4F94E',
+            createdAt: new Date().toISOString(),
+            cards: parsed.cards.map((c: any, i: number) => ({
+              id: `imported-card-${Date.now()}-${i}`,
+              question: c.question || c.q || 'Question',
+              answer: c.answer || c.a || 'Réponse',
+              intervalDays: 1,
+              easinessFactor: 2.5,
+              nextReviewDate: new Date().toISOString(),
+              reviewCount: 0,
+            })),
+          };
+          onSaveDeck(importedDeck);
+          setActiveDeckId(importedDeck.id);
+          setShowImportModal(false);
+          setImportText('');
+          confetti({ particleCount: 50, spread: 60 });
+          return;
+        }
+      }
+
+      // Parse text lines formatted with Q: and R: / A: or separator lines
+      const lines = importText.split('\n');
+      const cards: Flashcard[] = [];
+      let currentQ = '';
+      let currentA = '';
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.match(/^(\*\*Q:\*\*|Q:|Question:|\?)/i)) {
+          if (currentQ && currentA) {
+            cards.push({
+              id: `imported-card-${Date.now()}-${cards.length}`,
+              question: currentQ.trim(),
+              answer: currentA.trim(),
+              intervalDays: 1,
+              easinessFactor: 2.5,
+              nextReviewDate: new Date().toISOString(),
+              reviewCount: 0,
+            });
+            currentQ = '';
+            currentA = '';
+          }
+          currentQ = line.replace(/^(\*\*Q:\*\*|Q:|Question:|\?)\s*/i, '');
+        } else if (line.match(/^(\*\*R:\*\*|\*\*A:\*\*|R:|A:|Answer:|Réponse:)/i)) {
+          currentA = line.replace(/^(\*\*R:\*\*|\*\*A:\*\*|R:|A:|Answer:|Réponse:)\s*/i, '');
+        } else if (line.includes('---') || line.includes('###')) {
+          if (currentQ && currentA) {
+            cards.push({
+              id: `imported-card-${Date.now()}-${cards.length}`,
+              question: currentQ.trim(),
+              answer: currentA.trim(),
+              intervalDays: 1,
+              easinessFactor: 2.5,
+              nextReviewDate: new Date().toISOString(),
+              reviewCount: 0,
+            });
+            currentQ = '';
+            currentA = '';
+          }
+        } else if (currentA) {
+          currentA += '\n' + line;
+        } else if (currentQ) {
+          currentQ += '\n' + line;
+        }
+      }
+
+      if (currentQ && currentA) {
+        cards.push({
+          id: `imported-card-${Date.now()}-${cards.length}`,
+          question: currentQ.trim(),
+          answer: currentA.trim(),
+          intervalDays: 1,
+          easinessFactor: 2.5,
+          nextReviewDate: new Date().toISOString(),
+          reviewCount: 0,
+        });
+      }
+
+      if (cards.length > 0) {
+        const newDeck: FlashcardDeck = {
+          id: `deck-import-${Date.now()}`,
+          title: importTitle.trim() || `Deck Importé (${cards.length} cartes)`,
+          subject: importSubject,
+          description: `Deck généré depuis l'import de ${cards.length} cartes`,
+          color: '#D4F94E',
+          createdAt: new Date().toISOString(),
+          cards,
+        };
+        onSaveDeck(newDeck);
+        setActiveDeckId(newDeck.id);
+        setShowImportModal(false);
+        setImportText('');
+        setImportTitle('');
+        confetti({ particleCount: 50, spread: 60 });
+      } else {
+        alert('Format non reconnu. Assurez-vous d\'utiliser des lignes "Q: Question" et "R: Réponse" ou du format JSON.');
+      }
+    } catch (err) {
+      console.error('Import error:', err);
+      alert('Erreur lors de l\'analyse du texte ou du JSON.');
+    }
+  };
+
   return (
     <div className="space-y-6 pb-24 font-sans max-w-7xl mx-auto">
       {/* HEADER BAR */}
@@ -265,6 +412,14 @@ export const FlashcardsView: React.FC<FlashcardsViewProps> = ({
           >
             <Sparkles className="w-4 h-4 text-[#D4F94E] dark:text-[#161922]" />
             <span>Générer par IA</span>
+          </button>
+
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-[#161922] dark:text-white rounded-2xl text-xs font-bold shadow-xs transition-all cursor-pointer"
+          >
+            <Upload className="w-4 h-4 text-emerald-500" />
+            <span>Importer Decks</span>
           </button>
 
           <button
@@ -548,7 +703,16 @@ export const FlashcardsView: React.FC<FlashcardsViewProps> = ({
                     <p className="text-xs text-slate-500">{activeDeck.subject} • {activeDeck.cards.length} cartes mémoire</p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => setShowExportModal(true)}
+                      className="px-3 py-2 bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                      title="Exporter ce deck en JSON ou Markdown"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Exporter</span>
+                    </button>
+
                     <button
                       onClick={() => handleStartStudy(activeDeck.id)}
                       className="px-4 py-2 bg-[#D4F94E] hover:bg-[#CBF33B] text-[#161922] rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
@@ -834,6 +998,162 @@ export const FlashcardsView: React.FC<FlashcardsViewProps> = ({
                 </button>
                 <button type="submit" className="px-5 py-2 bg-[#D4F94E] hover:bg-[#CBF33B] text-[#161922] rounded-xl font-black cursor-pointer shadow-xs">
                   Enregistrer
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* EXPORT DECK MODAL */}
+      {showExportModal && activeDeck && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-[#D4F94E] text-[#161922] flex items-center justify-center font-black">
+                  <Download className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-[#161922] dark:text-white">Exporter le Deck</h3>
+                  <p className="text-xs text-slate-500">{activeDeck.title} ({activeDeck.cards.length} cartes)</p>
+                </div>
+              </div>
+              <button onClick={() => setShowExportModal(false)} className="text-slate-400 hover:text-[#161922] dark:hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {copiedNotification && (
+              <div className="p-3 bg-[#EFFDE2] border border-[#D4F94E] rounded-xl text-xs font-bold text-emerald-800 flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-600" />
+                <span>{copiedNotification}</span>
+              </div>
+            )}
+
+            <div className="space-y-3 pt-2">
+              <button
+                type="button"
+                onClick={() => handleDownloadDeckJson(activeDeck)}
+                className="w-full p-4 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 rounded-2xl flex items-center justify-between text-left transition-all cursor-pointer"
+              >
+                <div className="space-y-0.5">
+                  <span className="font-extrabold text-sm text-[#161922] dark:text-white block flex items-center gap-2">
+                    <FileDown className="w-4 h-4 text-blue-500" /> Télécharger en JSON (.json)
+                  </span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 block font-medium">
+                    Format universel de sauvegarde et de partage instantané
+                  </span>
+                </div>
+                <Download className="w-4 h-4 text-slate-400" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCopyMarkdown(activeDeck)}
+                className="w-full p-4 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 rounded-2xl flex items-center justify-between text-left transition-all cursor-pointer"
+              >
+                <div className="space-y-0.5">
+                  <span className="font-extrabold text-sm text-[#161922] dark:text-white block flex items-center gap-2">
+                    <Copy className="w-4 h-4 text-emerald-500" /> Copier en Markdown / Texte
+                  </span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 block font-medium">
+                    Copier le texte formaté Q & R dans le presse-papier pour Notion, Obsidian ou Anki
+                  </span>
+                </div>
+                <Share2 className="w-4 h-4 text-slate-400" />
+              </button>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* IMPORT DECK MODAL */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-black">
+                  <Upload className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-[#161922] dark:text-white">Importer des Flashcards</h3>
+                  <p className="text-xs text-slate-500">Collez du texte ou du JSON pour créer un deck instantanément</p>
+                </div>
+              </div>
+              <button onClick={() => setShowImportModal(false)} className="text-slate-400 hover:text-[#161922] dark:hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleExecuteImport} className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold mb-1 text-slate-700 dark:text-slate-300">Titre du Deck (Optionnel)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Formules Trigonométrie"
+                    value={importTitle}
+                    onChange={(e) => setImportTitle(e.target.value)}
+                    className="w-full bg-[#F5F6FA] dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl p-2.5 text-[#161922] dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1 text-slate-700 dark:text-slate-300">Matière</label>
+                  <select
+                    value={importSubject}
+                    onChange={(e) => setImportSubject(e.target.value)}
+                    className="w-full bg-[#F5F6FA] dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl p-2.5 text-[#161922] dark:text-white"
+                  >
+                    <option value="Mathématiques">Mathématiques</option>
+                    <option value="Physique-Chimie">Physique-Chimie</option>
+                    <option value="SVT & Biologie">SVT & Biologie</option>
+                    <option value="Informatique">Informatique</option>
+                    <option value="Philosophie">Philosophie</option>
+                    <option value="Langues (Anglais)">Langues (Anglais)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700 dark:text-slate-300">
+                    Contenu (JSON ou paires Q: / R:)
+                  </label>
+                  <span className="text-[10px] text-slate-400">Ex: Q: Théorème de Pythagore \n R: a² + b² = c²</span>
+                </div>
+                <textarea
+                  placeholder={`Q: Quelle est la vitesse de la lumière ?\nR: Environ 300 000 km/s\n\nQ: Formule de l'énergie cinétique ?\nR: Ec = 1/2 * m * v²`}
+                  value={importText}
+                  onChange={(e) => setImportText(e.target.value)}
+                  className="w-full bg-[#F5F6FA] dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl p-3 h-36 font-mono text-xs text-[#161922] dark:text-white outline-none focus:ring-2 focus:ring-[#D4F94E]"
+                  required
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(false)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-[#D4F94E] hover:bg-[#CBF33B] text-[#161922] rounded-xl font-black cursor-pointer shadow-xs"
+                >
+                  Créer et Importer
                 </button>
               </div>
             </form>

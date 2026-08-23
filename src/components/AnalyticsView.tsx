@@ -54,6 +54,33 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   const [weekOffset, setWeekOffset] = useState<number>(0);
   const [hoveredDayIndex, setHoveredDayIndex] = useState<number | null>(null);
 
+  // Activity & evolution curve bar chart state
+  const [activityTimeframe, setActivityTimeframe] = useState<'Weekly' | 'Monthly'>('Weekly');
+  const [hoveredBarIdx, setHoveredBarIdx] = useState<number | null>(4);
+
+  const weeklyBarData = [
+    { day: 'Dim', hours: 2.5, date: '13 Août', fullDate: 'Dimanche 13 Août' },
+    { day: 'Lun', hours: 5.0, date: '14 Août', fullDate: 'Lundi 14 Août' },
+    { day: 'Mar', hours: 3.2, date: '15 Août', fullDate: 'Mardi 15 Août' },
+    { day: 'Mer', hours: 7.0, date: '16 Août', fullDate: 'Mercredi 16 Août' },
+    { day: 'Jeu', hours: 6.75, date: '17 Août', fullDate: "Jeudi 17 Août (Aujourd'hui)", isCurrent: true },
+    { day: 'Ven', hours: 2.0, date: '18 Août', fullDate: 'Vendredi 18 Août' },
+    { day: 'Sam', hours: 5.5, date: '19 Août', fullDate: 'Samedi 19 Août' },
+  ];
+
+  const monthlyBarData = [
+    { day: 'Sem 1', hours: 26.5, date: '1 - 7 Août', fullDate: 'Semaine 1 (1 - 7 Août)' },
+    { day: 'Sem 2', hours: 31.0, date: '8 - 14 Août', fullDate: 'Semaine 2 (8 - 14 Août)' },
+    { day: 'Sem 3', hours: 34.5, date: '15 - 21 Août', fullDate: 'Semaine 3 (15 - 21 Août)', isCurrent: true },
+    { day: 'Sem 4', hours: 28.0, date: '22 - 28 Août', fullDate: 'Semaine 4 (22 - 28 Août)' },
+  ];
+
+  const currentBarChartData = activityTimeframe === 'Weekly' ? weeklyBarData : monthlyBarData;
+  const maxBarHours = activityTimeframe === 'Weekly' ? 8 : 40;
+  const activeHoverBarItem = hoveredBarIdx !== null && hoveredBarIdx < currentBarChartData.length
+    ? currentBarChartData[hoveredBarIdx]
+    : currentBarChartData[currentBarChartData.length - 1];
+
   // Calculate aggregated metrics
   const totalMinutes = logs.reduce((acc, curr) => acc + curr.durationMinutes, 0);
   const totalHours = (totalMinutes / 60).toFixed(1);
@@ -266,7 +293,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         ))}
       </div>
 
-      {/* CHARTS GRID */}
+      {/* CHARTS GRID: EVOLUTION COMPARATOR & SUBJECT BREAKDOWN */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         
         {/* CHART 1: WEEKLY CAROUSEL & COMPARATIVE EVOLUTION GRAPH (7 Cols) */}
@@ -659,6 +686,243 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             })}
           </div>
         </motion.div>
+      </div>
+
+      {/* ═════════════════════════════════════════════════════════════════════════ */}
+      {/* ACTIVITÉ & COURBE D'ÉVOLUTION + MAÎTRISE DISCIPLINAIRE (MIGRATED WIDGETS)  */}
+      {/* ═════════════════════════════════════════════════════════════════════════ */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        
+        {/* HOURS ACTIVITY BAR CHART & EVOLUTION CURVE (7 Cols) */}
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-40px' }}
+          transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+          className="lg:col-span-7 bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-xs border border-slate-100 dark:border-zinc-800 flex flex-col justify-between space-y-4"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-extrabold text-[#161922] dark:text-white tracking-tight">
+                Activité & Courbe d'Évolution
+              </h3>
+              <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 mt-0.5">
+                ↗ +3% de progression par rapport à la période précédente
+              </span>
+            </div>
+
+            {/* TIMEFRAME TOGGLE (WEEKLY / MONTHLY) */}
+            <div className="flex items-center bg-slate-100 dark:bg-zinc-800 p-0.5 rounded-xl border border-slate-200 dark:border-zinc-700">
+              <button
+                type="button"
+                onClick={() => {
+                  setActivityTimeframe('Weekly');
+                  setHoveredBarIdx(4);
+                }}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
+                  activityTimeframe === 'Weekly'
+                    ? 'bg-white dark:bg-zinc-900 text-[#161922] dark:text-white shadow-xs font-black'
+                    : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                Hebdo
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActivityTimeframe('Monthly');
+                  setHoveredBarIdx(2);
+                }}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
+                  activityTimeframe === 'Monthly'
+                    ? 'bg-white dark:bg-zinc-900 text-[#161922] dark:text-white shadow-xs font-black'
+                    : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                Mensuel
+              </button>
+            </div>
+          </div>
+
+          {/* DYNAMIC SELECTED DAY EVOLUTION HIGHLIGHT */}
+          <div className="relative">
+            <AnimatePresence mode="wait">
+              {activeHoverBarItem && (
+                <motion.div
+                  key={activeHoverBarItem.day + (hoveredBarIdx ?? 0) + activityTimeframe}
+                  initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                  transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                  className="mb-3 p-3 bg-[#161922] text-white rounded-2xl shadow-lg border border-zinc-700/80 text-xs flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      style={{ backgroundColor: currentTheme.accentColor, color: currentTheme.accentTextColor }}
+                      className="w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0"
+                    >
+                      <Clock className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-white">{activeHoverBarItem.fullDate}</span>
+                        {activeHoverBarItem.isCurrent && (
+                          <span
+                            style={{ backgroundColor: currentTheme.accentColor, color: currentTheme.accentTextColor }}
+                            className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded"
+                          >
+                            Actuel
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-zinc-400 font-medium">
+                        Temps de travail enregistré et synchronisé
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <span
+                      style={{ color: currentTheme.accentColor }}
+                      className="text-base font-black font-mono block leading-none"
+                    >
+                      {activeHoverBarItem.hours}h
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-semibold">
+                      {Math.round(activeHoverBarItem.hours * 60)} min
+                    </span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* VERTICAL BARS */}
+            <div className="h-32 flex items-end justify-between px-2 gap-2 mt-2">
+              {currentBarChartData.map((item, idx) => {
+                const heightPercent = Math.min(100, Math.round((item.hours / maxBarHours) * 100));
+                const isSelected = hoveredBarIdx === idx;
+                return (
+                  <div
+                    key={item.day + idx}
+                    onMouseEnter={() => setHoveredBarIdx(idx)}
+                    onClick={() => setHoveredBarIdx(idx)}
+                    className="flex-1 flex flex-col items-center gap-2 group cursor-pointer"
+                  >
+                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-28 rounded-full relative flex items-end justify-center p-0.5 overflow-hidden">
+                      <motion.div
+                        initial={{ height: 0 }}
+                        animate={{ height: `${heightPercent}%` }}
+                        transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+                        style={{
+                          backgroundColor:
+                            item.isCurrent || isSelected
+                              ? currentTheme.accentColor
+                              : undefined,
+                        }}
+                        className={`w-full rounded-full ${
+                          item.isCurrent || isSelected
+                            ? 'shadow-xs'
+                            : 'bg-slate-300 dark:bg-zinc-700'
+                        }`}
+                      />
+                    </div>
+                    <span
+                      className={`text-[10px] font-bold transition-colors ${
+                        isSelected
+                          ? 'text-[#161922] dark:text-white font-black scale-110'
+                          : 'text-slate-500 dark:text-slate-400'
+                      }`}
+                    >
+                      {item.day}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </motion.div>
+
+        {/* SUBJECT MASTERY & STUDY BALANCE (5 Cols) */}
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-40px' }}
+          transition={{ duration: 0.45, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+          className="lg:col-span-5 bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-xs border border-slate-100 dark:border-zinc-800 flex flex-col justify-between space-y-4"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div
+                style={{
+                  backgroundColor: currentTheme.accentSubtle,
+                  color: currentTheme.accentSubtleText,
+                }}
+                className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black"
+              >
+                <Award className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-[#161922] dark:text-white tracking-tight">
+                  Maîtrise Disciplinaire
+                </h3>
+                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">
+                  Niveau d'acquisition par matière
+                </span>
+              </div>
+            </div>
+            <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">
+              {subjectMetrics.length} matières
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {subjectMetrics.slice(0, 4).map((metric, idx) => (
+              <motion.div
+                key={metric.subject}
+                initial={{ opacity: 0, x: -10 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.3, delay: idx * 0.08 }}
+                className="space-y-1.5"
+              >
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="text-slate-800 dark:text-slate-200 truncate">{metric.subject}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">{metric.hours}h</span>
+                    <span className="font-black text-[#161922] dark:text-white font-mono">{metric.masteryPercentage}%</span>
+                  </div>
+                </div>
+                <div className="w-full h-2 bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full rounded-full"
+                    initial={{ width: 0 }}
+                    whileInView={{ width: `${metric.masteryPercentage}%` }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.1 + idx * 0.08 }}
+                    style={{
+                      backgroundColor:
+                        idx === 0
+                          ? currentTheme.accentColor
+                          : idx === 1
+                          ? '#60A5FA'
+                          : idx === 2
+                          ? '#C084FC'
+                          : '#FBBF24',
+                    }}
+                  />
+                </div>
+              </motion.div>
+            ))}
+          </div>
+
+          <div className="pt-2 border-t border-slate-100 dark:border-zinc-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+            <span className="font-semibold">Objectif hebdomadaire : 25h</span>
+            <span className="font-black text-[#161922] dark:text-white">
+              {totalHours}h / 25h
+            </span>
+          </div>
+        </motion.div>
+
       </div>
 
       {/* DYNAMIC PRODUCTIVITY SCORE PANEL */}

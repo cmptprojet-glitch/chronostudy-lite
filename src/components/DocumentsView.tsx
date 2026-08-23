@@ -24,9 +24,9 @@ import {
   Share2,
   FileSpreadsheet,
 } from 'lucide-react';
-import { AudioSummaryPlayer } from './AudioSummaryPlayer';
 import { AddToCourseModal } from './AddToCourseModal';
 import { motion, AnimatePresence } from 'motion/react';
+import { AnimatedIcon } from './AnimatedIcon';
 
 interface DocumentsViewProps {
   documents: StudyDocument[];
@@ -382,11 +382,11 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
           {(
             [
-              { id: 'all', label: 'Tous', count: documents.length },
-              { id: 'ia_generated', label: '🤖 IA Gemini', count: documents.filter((d) => d.isAiGenerated).length },
-              { id: 'pdf', label: '📄 PDF', count: documents.filter((d) => d.fileCategory === 'pdf').length },
-              { id: 'audio', label: '🎵 Audio MP3', count: documents.filter((d) => d.fileCategory === 'audio').length },
-              { id: 'text', label: '📝 Fiches & Notes', count: documents.filter((d) => d.fileCategory === 'text' || !d.fileCategory).length },
+              { id: 'all', label: 'Tous', iconType: 'document', count: documents.length },
+              { id: 'ia_generated', label: 'IA Gemini', iconType: 'sparkles', count: documents.filter((d) => d.isAiGenerated).length },
+              { id: 'pdf', label: 'PDF', iconType: 'pdf', count: documents.filter((d) => d.fileCategory === 'pdf').length },
+              { id: 'audio', label: 'Audio MP3', iconType: 'audio', count: documents.filter((d) => d.fileCategory === 'audio').length },
+              { id: 'text', label: 'Fiches & Notes', iconType: 'text', count: documents.filter((d) => d.fileCategory === 'text' || !d.fileCategory).length },
             ] as const
           ).map((tab) => {
             const isSelected = activeTabFilter === tab.id;
@@ -397,9 +397,10 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
                   isSelected
                     ? 'bg-[#161922] dark:bg-white text-white dark:text-[#161922] font-black shadow-xs'
-                    : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-slate-400 hover:text-white'
+                    : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 hover:text-black dark:hover:text-white'
                 }`}
               >
+                <AnimatedIcon type={tab.iconType} className="w-3.5 h-3.5" />
                 <span>{tab.label}</span>
                 <span className="text-[10px] opacity-70">({tab.count})</span>
               </button>
@@ -561,9 +562,6 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
                     </div>
                   )}
                 </div>
-
-                {/* INTEGRATED AUDIO SUMMARY PLAYER IF APPLICABLE */}
-                <AudioSummaryPlayer document={doc} onAddToAmbientSound={onAddToAmbientSound} />
 
                 {/* BOTTOM PRIMARY ACTIONS */}
                 <div className="pt-3 border-t border-slate-100 dark:border-zinc-800 flex items-center justify-between gap-2 text-xs">
