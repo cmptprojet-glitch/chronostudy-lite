@@ -19,6 +19,7 @@ import {
   Compass
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { AnimatedThemeToggler, TransitionVariant } from '@/registry/magicui/animated-theme-toggler';
 
 interface ThemeGalleryModalProps {
   isOpen: boolean;
@@ -36,6 +37,20 @@ export const ThemeGalleryModal: React.FC<ThemeGalleryModalProps> = ({
   const { currentThemeId, currentTheme, setTheme, availableThemes } = useTheme();
   const [selectedPreviewId, setSelectedPreviewId] = useState<ThemeId>(currentThemeId);
   const [appliedToast, setAppliedToast] = useState<string | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<TransitionVariant>(() => {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem('chronostudy_theme_vt_variant');
+      if (saved) return saved as TransitionVariant;
+    }
+    return 'circle';
+  });
+
+  const handleSelectVariant = (variant: TransitionVariant) => {
+    setSelectedVariant(variant);
+    try {
+      localStorage.setItem('chronostudy_theme_vt_variant', variant);
+    } catch (e) {}
+  };
 
   if (!isOpen) return null;
 
@@ -87,15 +102,12 @@ export const ThemeGalleryModal: React.FC<ThemeGalleryModalProps> = ({
 
           <div className="flex items-center gap-2">
             {onToggleDarkMode && (
-              <button
-                type="button"
-                onClick={onToggleDarkMode}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 hover:border-slate-400 rounded-full text-xs font-bold text-slate-700 dark:text-slate-200 transition-all cursor-pointer shadow-xs"
-                title="Basculer Mode Clair / Sombre"
-              >
-                {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-slate-600" />}
-                <span>{isDarkMode ? 'Mode Sombre' : 'Mode Clair'}</span>
-              </button>
+              <AnimatedThemeToggler
+                theme={isDarkMode ? 'dark' : 'light'}
+                onThemeChange={() => onToggleDarkMode()}
+                showLabel={true}
+                className="px-3.5 py-1.5 bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 hover:border-slate-400 rounded-full text-xs font-bold text-slate-700 dark:text-slate-200 shadow-xs"
+              />
             )}
 
             <button
@@ -302,6 +314,72 @@ export const ThemeGalleryModal: React.FC<ThemeGalleryModalProps> = ({
                 </div>
               );
             })}
+          </div>
+
+          {/* MAGIC UI ANIMATED THEME TOGGLER SHOWCASE */}
+          <div className="bg-[#EFFDE2]/60 dark:bg-zinc-900/80 p-5 rounded-3xl border border-[#D4F94E]/60 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Sparkles className="w-4 h-4 text-[#65A30D] dark:text-[#D4F94E]" />
+                  <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                    Animation de Transition de Thème (Magic UI)
+                  </h4>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">
+                  Cliquez pour tester l'animation fluide par clip-path View Transitions API. Choisissez votre forme géométrique préférée.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 shrink-0">
+                <AnimatedThemeToggler
+                  variant={selectedVariant}
+                  theme={isDarkMode ? 'dark' : 'light'}
+                  onThemeChange={() => onToggleDarkMode?.()}
+                  className="size-11 bg-white dark:bg-zinc-800 border-2 border-[#D4F94E] shadow-xs hover:scale-105"
+                />
+                <AnimatedThemeToggler
+                  variant={selectedVariant}
+                  theme={isDarkMode ? 'dark' : 'light'}
+                  onThemeChange={() => onToggleDarkMode?.()}
+                  showLabel={true}
+                  className="px-4 py-2 bg-[#D4F94E] hover:bg-[#c3e835] text-[#161922] font-black text-xs rounded-xl shadow-xs"
+                />
+              </div>
+            </div>
+
+            {/* VARIANT SELECTOR */}
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-2">
+                Forme de propagation de l'animation (Variant)
+              </span>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                {(
+                  [
+                    { id: 'circle', label: 'Cercle', desc: 'Classique' },
+                    { id: 'star', label: 'Étoile', desc: 'Magic UI' },
+                    { id: 'diamond', label: 'Losange', desc: 'Moderne' },
+                    { id: 'hexagon', label: 'Hexagone', desc: 'Tech' },
+                    { id: 'square', label: 'Carré', desc: 'Minimal' },
+                    { id: 'triangle', label: 'Triangle', desc: 'Vif' },
+                  ] as const
+                ).map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => handleSelectVariant(v.id as TransitionVariant)}
+                    className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
+                      selectedVariant === v.id
+                        ? 'border-[#D4F94E] bg-white dark:bg-zinc-800 shadow-xs font-black text-[#161922] dark:text-white ring-2 ring-[#D4F94E]/30'
+                        : 'border-slate-200 dark:border-zinc-800 hover:bg-white dark:hover:bg-zinc-800 text-slate-600 dark:text-slate-400 font-bold'
+                    }`}
+                  >
+                    <span className="text-xs block">{v.label}</span>
+                    <span className="text-[10px] text-slate-400 font-normal">{v.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* SYSTEM COMPARISON & SPECS */}

@@ -13,6 +13,7 @@ import { TrashModal } from './components/TrashModal';
 import { WorldClockModal } from './components/WorldClockModal';
 import { AccountModal } from './components/AccountModal';
 import { AuthModal } from './components/AuthModal';
+import { LoginComponent } from './components/LoginComponent';
 import { DeckBuilderStudio } from './components/DeckBuilderStudio';
 import { StudyGroupsView } from './components/StudyGroupsView';
 import { ThemeGalleryModal } from './components/ThemeGalleryModal';
@@ -37,6 +38,32 @@ export default function App() {
   const [worldClockModalOpen, setWorldClockModalOpen] = useState(false);
   const [themeGalleryOpen, setThemeGalleryOpen] = useState(false);
   const [showTrashModal, setShowTrashModal] = useState(false);
+
+  // Initial authentication gate / login screen at the start (au début)
+  const [showInitialLogin, setShowInitialLogin] = useState<boolean>(() => {
+    try {
+      const isCompleted = localStorage.getItem('chronostudy_auth_completed');
+      return isCompleted !== 'true';
+    } catch {
+      return true;
+    }
+  });
+
+  const handleLogout = () => {
+    try {
+      localStorage.removeItem('chronostudy_auth_completed');
+      localStorage.removeItem('chronostudy_auth_user');
+    } catch {}
+    const updated = {
+      ...userSettings,
+      auth: {
+        isAuthenticated: false,
+        isGuest: false,
+      },
+    };
+    handleSaveUserSettings(updated as any);
+    setShowInitialLogin(true);
+  };
 
   // Deep Focus Mode State
   const [isDeepFocus, setIsDeepFocus] = useState(false);
@@ -171,6 +198,8 @@ export default function App() {
             userSettings={userSettings}
             onSaveSettings={handleSaveUserSettings}
             onOpenThemeGallery={() => setThemeGalleryOpen(true)}
+            onOpenAuthModal={() => setAuthModalOpen(true)}
+            onLogout={handleLogout}
           />
 
           {/* AUTHENTICATION / LOGIN MODAL */}
@@ -180,6 +209,33 @@ export default function App() {
             userSettings={userSettings}
             onUpdateUserSettings={handleSaveUserSettings}
           />
+
+          {/* INITIAL AUTHENTICATION SCREEN / LOGIN MODAL (AU DÉBUT) */}
+          <AnimatePresence>
+            {showInitialLogin && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md"
+              >
+                <div className="w-full max-w-md">
+                  <LoginComponent
+                    isInitialScreen={true}
+                    userSettings={userSettings}
+                    onUpdateUserSettings={handleSaveUserSettings}
+                    onSuccess={() => {
+                      setShowInitialLogin(false);
+                      handleAwardXP(50, 'Connexion à votre espace ChronoStudy');
+                    }}
+                    onGuestMode={() => {
+                      setShowInitialLogin(false);
+                    }}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* TRASH 30-DAY RETENTION MODAL */}
           <TrashModal

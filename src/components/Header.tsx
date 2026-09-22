@@ -3,6 +3,7 @@ import { Search, Menu, Globe, Focus } from 'lucide-react';
 import { TabType } from './Navbar';
 import { useLanguage } from '../context/LanguageContext';
 import { AnimatedIcon } from './AnimatedIcon';
+import { AnimatedThemeToggler } from '@/registry/magicui/animated-theme-toggler';
 
 interface HeaderProps {
   totalStudyMinutes: number;
@@ -129,6 +130,18 @@ export const Header: React.FC<HeaderProps> = ({
           <Globe className="w-3.5 h-3.5 text-[#65A30D] dark:text-[#D4F94E] group-hover:rotate-45 transition-transform" />
           <span className="font-bold text-[11px]">{language.toUpperCase()}</span>
         </button>
+
+        {/* ANIMATED THEME TOGGLER (MAGIC UI) */}
+        <AnimatedThemeToggler
+          id="header-animated-theme-toggler"
+          theme={currentTheme === 'Sombre Concentré' ? 'dark' : 'light'}
+          onThemeChange={() => {
+            if (onToggleTheme) {
+              onToggleTheme();
+            }
+          }}
+          className="p-1.5 bg-white dark:bg-zinc-900 hover:bg-[#EFFDE2] dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800 rounded-full text-[#161922] dark:text-white transition-all shadow-xs"
+        />
 
         {/* WORLD CLOCK QUICK TRIGGER & LIVE DISPLAY */}
         {onOpenWorldClock && (

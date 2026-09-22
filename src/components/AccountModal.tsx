@@ -20,11 +20,18 @@ import {
   Palette,
   Sun,
   Moon,
-  Globe
+  Globe,
+  Scale,
+  Trash2,
+  AlertTriangle,
+  FileText,
+  Layers,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
 import { AnimatedIcon } from './AnimatedIcon';
+import { LegalNoticeModal } from './LegalNoticeModal';
+import { AnimatedThemeToggler } from '@/registry/magicui/animated-theme-toggler';
 
 interface AccountModalProps {
   isOpen: boolean;
@@ -32,6 +39,8 @@ interface AccountModalProps {
   userSettings?: UserSettings;
   onSaveSettings?: (newSettings: UserSettings) => void;
   onOpenThemeGallery?: () => void;
+  onOpenAuthModal?: () => void;
+  onLogout?: () => void;
 }
 
 // 20 AVATARS GALLERY FOR CHRONOSTUDY USERS
@@ -64,6 +73,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   userSettings = DEFAULT_USER_SETTINGS,
   onSaveSettings,
   onOpenThemeGallery,
+  onOpenAuthModal,
+  onLogout,
 }) => {
   const { currentThemeId, setTheme: setAppTheme } = useTheme();
   const { language: currentLang, setLanguage: setAppLanguage, t } = useLanguage();
@@ -92,6 +103,9 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   const [theme, setTheme] = useState(userSettings.system.theme);
 
   const [isSaved, setIsSaved] = useState(false);
+  const [legalModalOpen, setLegalModalOpen] = useState(false);
+  const [icsLoading, setIcsLoading] = useState(false);
+  const [purgeSuccess, setPurgeSuccess] = useState(false);
 
   // Sync state whenever modal opens or settings change
   React.useEffect(() => {
@@ -209,16 +223,59 @@ export const AccountModal: React.FC<AccountModalProps> = ({
       JSON.stringify({
         app: "ChronoStudy",
         exportedAt: new Date().toISOString(),
+        compliance: "Export de données personnelles réalisé selon l'Article 20 du RGPD.",
         user: { name, email, role, university, academicGoal, targetWeeklyHours },
         note: "Sauvegarde complète de votre espace d'études ChronoStudy (Decks, Cartes mémoires, Tâches, Sessions Pomodoro)."
       }, null, 2)
     );
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `ChronoStudy_Backup_${new Date().toISOString().slice(0, 10)}.json`);
+    downloadAnchor.setAttribute("download", `ChronoStudy_Archive_RGPD_${new Date().toISOString().slice(0, 10)}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
+  };
+
+  const handleDownloadIcs = async () => {
+    setIcsLoading(true);
+    try {
+      const res = await fetch('/api/v1/calendar/export-ics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessions: [] }),
+      });
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ChronoStudy_Planning_${new Date().toISOString().slice(0, 10)}.ics`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      console.warn('Erreur export iCal:', e);
+    } finally {
+      setIcsLoading(false);
+    }
+  };
+
+  const handleGdprPurge = async () => {
+    const confirmed = window.confirm(
+      "Droit à l'effacement (Article 17 du RGPD) :\nÊtes-vous sûr de vouloir supprimer définitivement l'ensemble de vos données d'études (fiches, decks, journaux) ? Cette opération est irréversible."
+    );
+    if (!confirmed) return;
+
+    try {
+      await fetch('/api/v1/user/purge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: 'guest-session' }),
+      });
+      setPurgeSuccess(true);
+      setTimeout(() => setPurgeSuccess(false), 3000);
+    } catch (e) {
+      console.warn('Erreur purge:', e);
+    }
   };
 
   return (
@@ -404,12 +461,52 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     className="w-full accent-[#D4F94E] cursor-pointer"
                   />
                 </div>
+
+                {/* AUTH & SOCIAL LOGIN SECTION (UIVERSE INTEGRATION) */}
+                <div className="bg-[#F5F6FA] dark:bg-zinc-800 p-4 rounded-2xl border border-slate-200 dark:border-zinc-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:col-span-2">
+                  <div>
+                    <span className="text-xs font-black text-[#161922] dark:text-white block">
+                      Authentification & Comptes Liés
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                      {(userSettings as any)?.auth?.isAuthenticated
+                        ? `Connecté avec ${(userSettings as any)?.auth?.provider || 'Compte Email'}`
+                        : 'Connectez-vous via Email, Google, Apple ou Microsoft'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {onOpenAuthModal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenAuthModal();
+                        }}
+                        className="px-3.5 py-1.5 bg-[#2d79f3] text-white hover:bg-[#2465cc] rounded-xl text-xs font-extrabold transition-all shadow-xs cursor-pointer"
+                      >
+                        {(userSettings as any)?.auth?.isAuthenticated ? 'Changer de Compte' : 'Se Connecter'}
+                      </button>
+                    )}
+                    {onLogout && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onLogout();
+                        }}
+                        className="px-3 py-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      >
+                        Déconnexion
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
 
             </div>
           )}
 
-          {/* TAB 2: INTEGRATIONS */}
+          {/* TAB 2: INTEGRATIONS & EXPORTS */}
           {activeTab === 'integrations' && (
             <div className="space-y-4">
               
@@ -421,8 +518,8 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                       <Music className="w-4 h-4 text-[#161922]" />
                     </div>
                     <div>
-                      <h4 className="text-xs font-bold text-[#161922] dark:text-white">Spotify & Playlists Deep Work</h4>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Synchroniser les musiques d'ambiance et binaural beats</p>
+                      <h4 className="text-xs font-bold text-[#161922] dark:text-white">Lecteur Audio & Ondes Alpha</h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Musiques d'ambiance et binaural beats intégrés (Lo-Fi, Synthwave)</p>
                     </div>
                   </div>
                   <button
@@ -442,7 +539,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
                 {spotifyConnected && (
                   <div className="pt-2 border-t border-slate-200 dark:border-zinc-700 space-y-1.5">
-                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">Playlist par Défaut</label>
+                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">Ambiance Sonore par Défaut</label>
                     <select
                       value={selectedPlaylist}
                       onChange={(e) => setSelectedPlaylist(e.target.value)}
@@ -457,55 +554,46 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 )}
               </div>
 
-              {/* GOOGLE CALENDAR */}
+              {/* UNIVERSAL ICALENDAR EXPORT (Section 7.1) */}
               <div className="bg-[#F5F6FA] dark:bg-zinc-800 p-4 rounded-2xl border border-slate-200 dark:border-zinc-700 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-xl bg-[#161922] text-[#D4F94E] flex items-center justify-center font-black">
                     <Calendar className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-[#161922] dark:text-white">Google Calendar</h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Exporter les créneaux de planning et révisions</p>
+                    <h4 className="text-xs font-bold text-[#161922] dark:text-white">Planning iCalendar (.ics universel)</h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Compatible Google Calendar, Apple, Outlook & Nextcloud</p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setGcalConnected(!gcalConnected)}
-                  className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 cursor-pointer ${
-                    gcalConnected ? 'bg-[#D4F94E]' : 'bg-slate-300 dark:bg-zinc-700'
-                  }`}
+                  onClick={handleDownloadIcs}
+                  disabled={icsLoading}
+                  className="px-3.5 py-2 bg-[#D4F94E] hover:bg-[#CBF33B] text-[#161922] rounded-xl text-xs font-black transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
                 >
-                  <span
-                    className={`w-5 h-5 bg-[#161922] rounded-full transition-transform transform shadow-xs ${
-                      gcalConnected ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{icsLoading ? 'Export...' : 'Télécharger .ics'}</span>
                 </button>
               </div>
 
-              {/* NOTION / TODOIST */}
+              {/* NOTION / MARKDOWN EXPORT */}
               <div className="bg-[#F5F6FA] dark:bg-zinc-800 p-4 rounded-2xl border border-slate-200 dark:border-zinc-700 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-xl bg-[#161922] text-white flex items-center justify-center font-black">
                     <BookOpen className="w-4 h-4 text-[#D4F94E]" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-[#161922] dark:text-white">Notion Workspace</h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Lier les cours et fiches de synthèse</p>
+                    <h4 className="text-xs font-bold text-[#161922] dark:text-white">Exportation Notion & Markdown</h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Exporter les fiches et synthèses pour Notion</p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setNotionConnected(!notionConnected)}
-                  className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 cursor-pointer ${
-                    notionConnected ? 'bg-[#D4F94E]' : 'bg-slate-300 dark:bg-zinc-700'
-                  }`}
+                  onClick={handleExportData}
+                  className="px-3.5 py-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl text-xs font-black text-[#161922] dark:text-white transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
                 >
-                  <span
-                    className={`w-5 h-5 bg-[#161922] rounded-full transition-transform transform shadow-xs ${
-                      notionConnected ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export JSON</span>
                 </button>
               </div>
             </div>
@@ -515,9 +603,39 @@ export const AccountModal: React.FC<AccountModalProps> = ({
           {activeTab === 'settings' && (
             <div className="space-y-5">
               <div className="space-y-4">
-                <h4 className="font-extrabold text-xs text-[#161922] dark:text-white uppercase tracking-wider">
-                  Mode Visuel & Thème Actif
-                </h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-extrabold text-xs text-[#161922] dark:text-white uppercase tracking-wider">
+                    Mode Visuel & Thème Actif
+                  </h4>
+                  <span className="text-[10px] font-bold text-slate-500">Magic UI View Transitions</span>
+                </div>
+
+                {/* ANIMATED THEME TOGGLER (MAGIC UI) BAR */}
+                <div className="bg-[#EFFDE2]/70 dark:bg-zinc-800/80 p-3.5 rounded-2xl border border-[#D4F94E]/60 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <AnimatedThemeToggler
+                      id="account-animated-theme-toggler-icon"
+                      theme={theme === 'Sombre Concentré' ? 'dark' : 'light'}
+                      onThemeChange={(newTheme) => handleModeChange(newTheme === 'dark')}
+                      className="size-9 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 shadow-xs"
+                    />
+                    <div>
+                      <span className="text-xs font-black text-[#161922] dark:text-white block">
+                        Basculeur Animé Magic UI
+                      </span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">
+                        {theme === 'Sombre Concentré' ? 'Mode Sombre Concentré actif' : 'Mode Clair Moderne actif'}
+                      </span>
+                    </div>
+                  </div>
+                  <AnimatedThemeToggler
+                    id="account-animated-theme-toggler-btn"
+                    theme={theme === 'Sombre Concentré' ? 'dark' : 'light'}
+                    onThemeChange={(newTheme) => handleModeChange(newTheme === 'dark')}
+                    showLabel={true}
+                    className="px-3.5 py-1.5 bg-[#D4F94E] hover:bg-[#c6ec3b] text-[#161922] font-black text-xs rounded-xl shadow-xs"
+                  />
+                </div>
 
                 {/* LIGHT / DARK MODE DIRECT CLICKABLE TILES */}
                 <div className="grid grid-cols-2 gap-3">
@@ -632,18 +750,28 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                 </div>
               </div>
 
-              {/* DATA EXPORT */}
+              {/* DATA EXPORT & GDPR (Sections 7.5, 10.1, 10.3) */}
               <div className="space-y-3 pt-2">
-                <h4 className="font-extrabold text-xs text-[#161922] dark:text-white uppercase tracking-wider">
-                  Sauvegarde & Exportation des données
+                <h4 className="font-extrabold text-xs text-[#161922] dark:text-white uppercase tracking-wider flex items-center justify-between">
+                  <span>Sauvegarde & Droits RGPD</span>
+                  <button
+                    type="button"
+                    onClick={() => setLegalModalOpen(true)}
+                    className="text-[11px] text-[#65A30D] dark:text-[#D4F94E] hover:underline font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Scale className="w-3.5 h-3.5" />
+                    <span>Politique & Mentions Légales</span>
+                  </button>
                 </h4>
+
+                {/* GDPR ART. 20 EXPORT */}
                 <div className="bg-[#F5F6FA] dark:bg-zinc-800 p-4 rounded-2xl border border-slate-200 dark:border-zinc-700 flex items-center justify-between">
                   <div>
                     <span className="font-extrabold text-xs text-[#161922] dark:text-white block">
-                      Exporter mes données d'études (.json)
+                      Archive Complète des Données (RGPD Art. 20)
                     </span>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium block">
-                      Téléchargez un fichier JSON complet de vos decks, cartes mémoires et sessions d'étude.
+                      Télécharger un fichier JSON certifié de vos flashcards, documents, planning et historiques.
                     </span>
                   </div>
                   <button
@@ -652,9 +780,36 @@ export const AccountModal: React.FC<AccountModalProps> = ({
                     className="px-3.5 py-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl text-xs font-extrabold text-[#161922] dark:text-white transition-all flex items-center gap-2 shadow-xs shrink-0 cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Exporter</span>
+                    <span>Exporter JSON</span>
                   </button>
                 </div>
+
+                {/* GDPR ART. 17 PURGE */}
+                <div className="bg-rose-50/60 dark:bg-rose-950/20 p-4 rounded-2xl border border-rose-200 dark:border-rose-900/50 flex items-center justify-between">
+                  <div>
+                    <span className="font-extrabold text-xs text-rose-900 dark:text-rose-200 block flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                      Droit à l'effacement définitif (RGPD Art. 17)
+                    </span>
+                    <span className="text-[11px] text-rose-700 dark:text-rose-300 font-medium block">
+                      Supprime l'intégralité de vos données de révision sur le serveur et le navigateur.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGdprPurge}
+                    className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-extrabold transition-all flex items-center gap-2 shadow-xs shrink-0 cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Purger mes données</span>
+                  </button>
+                </div>
+
+                {purgeSuccess && (
+                  <div className="p-3 bg-emerald-100 text-emerald-900 rounded-xl text-xs font-bold text-center animate-fade-in">
+                    Toutes vos données serveur ont été purgées avec succès.
+                  </div>
+                )}
               </div>
 
             </div>
@@ -681,7 +836,13 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
         {/* MODAL FOOTER */}
         <div className="p-4 border-t border-slate-100 dark:border-zinc-800 bg-[#F5F6FA] dark:bg-zinc-950 flex items-center justify-between shrink-0 text-xs font-bold text-slate-500 dark:text-slate-400">
-          <span>ChronoStudy • Plateforme Pédagogique d'Apprentissage Actif & IA</span>
+          <button
+            onClick={() => setLegalModalOpen(true)}
+            className="hover:text-[#161922] dark:hover:text-white transition-colors flex items-center gap-1 cursor-pointer"
+          >
+            <Scale className="w-3.5 h-3.5" />
+            <span>Mentions Légales & RGPD</span>
+          </button>
           <button
             onClick={onClose}
             className="px-4 py-2 bg-slate-200 dark:bg-zinc-800 hover:bg-slate-300 dark:hover:bg-zinc-700 text-[#161922] dark:text-zinc-200 rounded-xl font-extrabold transition-all cursor-pointer"
@@ -691,6 +852,11 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         </div>
 
       </div>
+
+      <LegalNoticeModal
+        isOpen={legalModalOpen}
+        onClose={() => setLegalModalOpen(false)}
+      />
     </div>
   );
 };

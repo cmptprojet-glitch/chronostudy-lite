@@ -1,6 +1,27 @@
 @import "tailwindcss";
 
 /* ==========================================================================
+   MAGIC UI ANIMATED THEME TOGGLER - VIEW TRANSITIONS
+   ========================================================================== */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 9999;
+}
+
+[data-magicui-theme-vt="active"]::view-transition-new(root) {
+  clip-path: var(--magicui-theme-vt-clip-from, circle(0% at 50% 50%));
+}
+
+/* ==========================================================================
    CSS VARIABLES FOR CHRONOSTUDY THEMES
    ========================================================================== */
 
@@ -646,4 +667,169 @@ svg circle[fill="#D5F862"] {
 .group:hover .icon-interactive-target {
   transform: scale(1.3) rotate(45deg);
 }
+
+/* ==========================================================================
+   LOGIN COMPONENTS - From Uiverse.io by mahiatlinux
+   With Google, Apple, and Microsoft social connection options
+   ========================================================================== */
+
+.uiverse-login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.uiverse-login-container .form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background-color: #1f1f1f;
+  padding: 30px;
+  width: 450px;
+  max-width: 100%;
+  border-radius: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7);
+  border: 1px solid #333333;
+}
+
+.uiverse-login-container ::placeholder {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  color: #aaa;
+}
+
+.uiverse-login-container .form button.close-btn {
+  align-self: flex-end;
+}
+
+.uiverse-login-container .flex-column > label {
+  color: #f1f1f1;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.uiverse-login-container .inputForm {
+  border: 1.5px solid #333;
+  border-radius: 10px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+  padding-right: 12px;
+  transition: 0.2s ease-in-out;
+  background-color: #2b2b2b;
+}
+
+.uiverse-login-container .input {
+  margin-left: 10px;
+  border-radius: 10px;
+  border: none;
+  width: 100%;
+  height: 100%;
+  background-color: #2b2b2b;
+  color: #f1f1f1;
+  font-size: 14px;
+}
+
+.uiverse-login-container .input:focus {
+  outline: none;
+}
+
+.uiverse-login-container .inputForm:focus-within {
+  border: 1.5px solid #2d79f3;
+}
+
+.uiverse-login-container .flex-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.uiverse-login-container .flex-row > div > label {
+  font-size: 14px;
+  color: #f1f1f1;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.uiverse-login-container .span {
+  font-size: 14px;
+  margin-left: 5px;
+  color: #2d79f3;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.uiverse-login-container .span:hover {
+  opacity: 0.85;
+  text-decoration: underline;
+}
+
+.uiverse-login-container .button-submit {
+  margin: 20px 0 10px 0;
+  background-color: #2d79f3;
+  border: none;
+  color: white;
+  font-size: 15px;
+  font-weight: 500;
+  border-radius: 10px;
+  height: 50px;
+  width: 100%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.uiverse-login-container .button-submit:hover:not(:disabled) {
+  background-color: #2465cc;
+}
+
+.uiverse-login-container .button-submit:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.uiverse-login-container .button-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.uiverse-login-container .p {
+  text-align: center;
+  color: #f1f1f1;
+  font-size: 14px;
+  margin: 5px 0;
+}
+
+.uiverse-login-container .btn {
+  margin-top: 10px;
+  width: 100%;
+  height: 50px;
+  border-radius: 10px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-weight: 500;
+  gap: 10px;
+  border: 1px solid #333;
+  background-color: #2b2b2b;
+  color: #f1f1f1;
+  cursor: pointer;
+  transition: 0.2s ease-in-out;
+  font-size: 14px;
+}
+
+.uiverse-login-container .btn:hover {
+  border: 1px solid #2d79f3;
+  background-color: #333333;
+}
+
 

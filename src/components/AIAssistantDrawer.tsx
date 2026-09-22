@@ -461,6 +461,9 @@ export const AIAssistantDrawer: React.FC<AIAssistantDrawerProps> = ({
                       <div className="flex items-center gap-2">
                         <h3 className="font-black text-base text-white tracking-tight">Nova AI Copilot</h3>
                         <span className="text-[9px] font-black uppercase px-2 py-0.5 bg-zinc-800 text-[#D4F94E] rounded-full border border-zinc-700">
+                          Gemini 2.5 Flash
+                        </span>
+                        <span className="text-[9px] font-medium text-zinc-400">
                           {novaExpression.toUpperCase()}
                         </span>
                       </div>

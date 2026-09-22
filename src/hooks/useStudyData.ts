@@ -63,6 +63,26 @@ export function useStudyData(onAwardXP?: (amount: number, reason: string) => voi
     }
   }, [userSettings?.system?.theme]);
 
+  // Listen to external theme toggles (e.g. MagicUI AnimatedThemeToggler)
+  useEffect(() => {
+    const handleCustomToggle = (e: Event) => {
+      const customEvent = e as CustomEvent<{ theme: 'dark' | 'light' }>;
+      const isDark = customEvent.detail?.theme === 'dark';
+      setUserSettings((prev) => ({
+        ...prev,
+        system: {
+          ...(prev?.system || DEFAULT_USER_SETTINGS.system),
+          theme: isDark ? 'Sombre Concentré' : 'Clair Moderne',
+        },
+      }));
+    };
+
+    window.addEventListener('chronostudy-theme-toggle', handleCustomToggle);
+    return () => {
+      window.removeEventListener('chronostudy-theme-toggle', handleCustomToggle);
+    };
+  }, []);
+
   // Clean up legacy keys once
   useEffect(() => {
     try {

@@ -1,340 +1,237 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { AiProviderService } from "./server/aiProvider";
+import { AuthController, rateLimiter } from "./server/auth";
+import { StorageController } from "./server/storage";
+import { CalendarController } from "./server/calendar";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 
+// Security: Disable X-Powered-By header (Section S8)
+app.disable("x-powered-by");
+
+// Security Headers Middleware (Section S8, S10)
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+
+// JSON body parser with sensible cap (10MB)
 app.use(express.json({ limit: "10mb" }));
 
-// Initialize Gemini Client (server-side only)
-const apiKey = process.env.GEMINI_API_KEY;
-const ai = apiKey ? new GoogleGenAI({
-  apiKey,
-  httpOptions: {
-    headers: {
-      "User-Agent": "aistudio-build",
-    },
-  },
-}) : null;
+// Initialize AI Provider
+const aiProvider = new AiProviderService();
 
-// Helper to handle missing API Key
-const checkAi = (res: express.Response) => {
-  if (!ai) {
-    res.status(500).json({ error: "La clé API GEMINI_API_KEY n'est pas configurée dans l'environnement serveur." });
-    return false;
+// General API Rate Limiting (60 req / min)
+const generalRateLimit = rateLimiter(60, 60);
+// AI Endpoints Rate Limiting (20 req / min to prevent cost explosions - Section S5)
+const aiRateLimit = rateLimiter(20, 60);
+
+// ==========================================
+// 1. HEALTH & METRICS
+// ==========================================
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    aiConfigured: aiProvider.isAiConfigured(),
+    version: "1.1.0",
+    compliance: {
+      gdprReady: true,
+      authProvider: "session_token_pbkdf2",
+      offlineCapable: true,
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// ==========================================
+// 2. AUTHENTICATION (P0.1, S1, S2)
+// ==========================================
+app.post("/api/v1/auth/register", generalRateLimit, AuthController.register);
+app.post("/api/v1/auth/login", generalRateLimit, AuthController.login);
+app.post("/api/v1/auth/logout", generalRateLimit, AuthController.logout);
+app.get("/api/v1/auth/me", generalRateLimit, AuthController.me);
+
+// Backward-compatible auth aliases
+app.post("/api/auth/register", generalRateLimit, AuthController.register);
+app.post("/api/auth/login", generalRateLimit, AuthController.login);
+app.post("/api/auth/logout", generalRateLimit, AuthController.logout);
+app.get("/api/auth/me", generalRateLimit, AuthController.me);
+
+// ==========================================
+// 3. STORAGE & GDPR (P0.2, S3, Section 10)
+// ==========================================
+app.get("/api/v1/user/data", generalRateLimit, StorageController.getUserData);
+app.post("/api/v1/user/data", generalRateLimit, StorageController.saveUserData);
+app.get("/api/v1/user/export", generalRateLimit, StorageController.exportUserData);
+app.post("/api/v1/user/purge", generalRateLimit, StorageController.purgeUserData);
+
+// ==========================================
+// 4. STUDY GROUPS (Section 7.2)
+// ==========================================
+app.get("/api/v1/groups", generalRateLimit, StorageController.getGroups);
+app.post("/api/v1/groups", generalRateLimit, StorageController.createGroup);
+app.post("/api/v1/groups/join", generalRateLimit, StorageController.joinGroup);
+app.post("/api/v1/groups/:id/messages", generalRateLimit, StorageController.postGroupMessage);
+app.post("/api/v1/groups/:id/share-deck", generalRateLimit, StorageController.shareDeckToGroup);
+
+// Backward-compatible groups aliases
+app.get("/api/groups", generalRateLimit, StorageController.getGroups);
+app.post("/api/groups", generalRateLimit, StorageController.createGroup);
+app.post("/api/groups/join", generalRateLimit, StorageController.joinGroup);
+app.post("/api/groups/:id/messages", generalRateLimit, StorageController.postGroupMessage);
+app.post("/api/groups/:id/share-deck", generalRateLimit, StorageController.shareDeckToGroup);
+
+// ==========================================
+// 5. CALENDAR EXPORT (iCal / .ics - Section 7.1 & 11.4)
+// ==========================================
+app.post("/api/v1/calendar/export-ics", generalRateLimit, CalendarController.exportIcs);
+app.post("/api/calendar/export-ics", generalRateLimit, CalendarController.exportIcs);
+app.get("/api/calendar/export-ics", generalRateLimit, CalendarController.exportIcs);
+
+// ==========================================
+// 6. AI PROVIDER ENDPOINTS (P0.3, S6, S7, 11.2)
+// Both /api/v1/ai/* and /api/gemini/* supported!
+// ==========================================
+
+// Flashcards & Decks Handlers
+const handleFlashcardsGen = async (req: express.Request, res: express.Response) => {
+  try {
+    const { subject, topic, cardCount, count, documentText } = req.body || {};
+    const finalCount = cardCount || count || 6;
+    const finalTopic = topic || subject || "Concepts Clés";
+    const result = await aiProvider.generateFlashcards({
+      subject,
+      topic: finalTopic,
+      cardCount: finalCount,
+      documentText,
+    });
+    res.json(result);
+  } catch (error: any) {
+    console.warn("[API] Erreur flashcards:", error?.message || error);
+    res.status(500).json({ error: "Erreur lors de la génération des flashcards." });
   }
-  return true;
 };
 
-// API Route 1: Health check
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", aiConfigured: !!ai, timestamp: new Date().toISOString() });
-});
+app.post("/api/v1/ai/generate-flashcards", aiRateLimit, handleFlashcardsGen);
+app.post("/api/gemini/generate-flashcards", aiRateLimit, handleFlashcardsGen);
+app.post("/api/v1/ai/flashcards", aiRateLimit, handleFlashcardsGen);
+app.post("/api/gemini/flashcards", aiRateLimit, handleFlashcardsGen);
+app.post("/api/v1/ai/generate-deck", aiRateLimit, handleFlashcardsGen);
+app.post("/api/gemini/generate-deck", aiRateLimit, handleFlashcardsGen);
 
-// API Route 2: Generate Flashcards Deck (ChronoStudy Deck Pro)
-app.post("/api/gemini/generate-flashcards", async (req, res) => {
-  if (!checkAi(res)) return;
+// Summary Handler (AIAssistantDrawer)
+const handleSummaryGen = async (req: express.Request, res: express.Response) => {
   try {
-    const { subject, topic, cardCount = 6, documentText } = req.body;
-
-    const prompt = documentText
-      ? `Génère exactement ${cardCount} cartes mémoire (flashcards) pédagogiques d'apprentissage actif (Active Recall) au format JSON à partir du document suivant pour la matière "${subject}".\nDocument:\n${documentText.slice(0, 4000)}`
-      : `Génère exactement ${cardCount} cartes mémoire (flashcards) pédagogiques d'apprentissage actif (Active Recall) au format JSON pour le sujet "${topic}" dans la matière "${subject}".`;
-
-    const response = await ai!.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        systemInstruction: "Tu es un expert en pédagogie universitaire et répétition espacée (SM-2/Anki). Génère des questions précises et des réponses synthétiques, très claires et mémorables.",
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING, description: "Titre explicatif du deck" },
-            description: { type: Type.STRING, description: "Brève description du contenu" },
-            cards: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  question: { type: Type.STRING, description: "Question ou concept d'apprentissage actif à tester" },
-                  answer: { type: Type.STRING, description: "Réponse concise et exacte avec explications claires" }
-                },
-                required: ["question", "answer"]
-              }
-            }
-          },
-          required: ["title", "description", "cards"]
-        }
-      }
-    });
-
-    const data = JSON.parse(response.text || "{}");
-    res.json(data);
+    const { topic, subject, language } = req.body || {};
+    const result = await aiProvider.generateSummary({ topic, subject, language });
+    res.json(result);
   } catch (error: any) {
-    console.error("Error generating flashcards:", error);
-    res.status(500).json({ error: error?.message || "Erreur lors de la génération des flashcards" });
+    console.warn("[API] Erreur summary:", error?.message || error);
+    res.status(500).json({ error: "Erreur lors de la génération du résumé." });
   }
-});
+};
 
-// API Route 3: Generate Custom Educational Widget from AI
-app.post("/api/gemini/generate-widget", async (req, res) => {
-  if (!checkAi(res)) return;
+app.post("/api/v1/ai/generate-summary", aiRateLimit, handleSummaryGen);
+app.post("/api/gemini/generate-summary", aiRateLimit, handleSummaryGen);
+
+// Custom Educational Widget Handler
+const handleWidgetGen = async (req: express.Request, res: express.Response) => {
   try {
-    const { promptText, category = "education", widgetType = "metric" } = req.body;
-
-    const prompt = `Génère la configuration complète d'un widget interactif sur-mesure dédié aux études et à la réussite académique pour ChronoStudy.
-Demande utilisateur : "${promptText}"
-Catégorie cible : ${category} (education, active_recall, planning, exam, study_budget).
-Type de widget suggéré : ${widgetType} (metric, chart, habit_streak, countdown, quote, active_recall, time_budget).
-
-Retourne un objet JSON valide avec :
-- title : titre court et impactant lié aux études
-- category : education, active_recall, planning, exam, ou study_budget
-- type : metric, chart, habit_streak, countdown, quote, active_recall, ou time_budget
-- value : valeur clé affichée (ex: "88%", "94.2%", "14 jours", "32/40h", "12 jours")
-- target : nombre cible objectif (ex: 100, 95, 21, 40, 12)
-- unit : unité de mesure (ex: "%", "hrs", "jours", "cartes", "sessions")
-- color : code couleur hexa soigné (ex: "#10b981", "#3b82f6", "#8b5cf6", "#ef4444", "#f59e0b", "#06b6d4")
-- icon : un emoji représentatif de l'éducation (ex: "📚", "🧠", "🎯", "⏱️", "⚡", "📊")
-- description : brève phrase explicative sur l'utilité pédagogique
-- chartData : si le type est chart, active_recall ou time_budget, tableau de 5 à 7 points avec label (string) et value (number).`;
-
-    const response = await ai!.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        systemInstruction: "Tu es un designer d'UI et d'analyse de performance académique pour le dashboard d'études ChronoStudy.",
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            category: { type: Type.STRING },
-            type: { type: Type.STRING },
-            value: { type: Type.STRING },
-            target: { type: Type.NUMBER },
-            unit: { type: Type.STRING },
-            color: { type: Type.STRING },
-            icon: { type: Type.STRING },
-            description: { type: Type.STRING },
-            chartData: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  label: { type: Type.STRING },
-                  value: { type: Type.NUMBER }
-                },
-                required: ["label", "value"]
-              }
-            }
-          },
-          required: ["title", "category", "type", "value", "color", "icon", "description"]
-        }
-      }
-    });
-
-    const data = JSON.parse(response.text || "{}");
-    res.json(data);
+    const { promptText, category, widgetType } = req.body || {};
+    const result = await aiProvider.generateWidget({ promptText, category, widgetType });
+    res.json(result);
   } catch (error: any) {
-    console.error("Error generating widget:", error);
-    res.status(500).json({ error: error?.message || "Erreur lors de la génération du widget" });
+    console.warn("[API] Erreur widget:", error?.message || error);
+    res.status(500).json({ error: "Erreur lors de la génération du widget." });
   }
-});
+};
 
-// API Route 4: Analyze Document (Study Support AI)
-app.post("/api/gemini/analyze-document", async (req, res) => {
-  if (!checkAi(res)) return;
+app.post("/api/v1/ai/generate-widget", aiRateLimit, handleWidgetGen);
+app.post("/api/gemini/generate-widget", aiRateLimit, handleWidgetGen);
+
+// Document Analysis Handler
+const handleAnalyzeDoc = async (req: express.Request, res: express.Response) => {
   try {
-    const { fileName, fileContent } = req.body;
-
-    const prompt = `Analyse le document académique suivant ("${fileName}") et retourne une analyse structurée complète en JSON pour aider l'étudiant.\n\nContenu du document:\n${fileContent.slice(0, 6000)}`;
-
-    const response = await ai!.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        systemInstruction: "Tu es un assistant universitaire expert en pédagogie, analyse de cours, extraction de formules et fiches de révision de haute clarté.",
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            summary: { type: Type.STRING, description: "Résumé exécutif synthétique en 3 à 5 phrases" },
-            keyConcepts: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "Liste des 4 à 6 concepts clés identifiés"
-            },
-            formulasAndDefs: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "Liste des formules mathématiques, scientifiques ou définitions indispensables"
-            },
-            studySuggestions: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "Conseils et questions d'active recall ciblées"
-            }
-          },
-          required: ["summary", "keyConcepts", "formulasAndDefs", "studySuggestions"]
-        }
-      }
-    });
-
-    const data = JSON.parse(response.text || "{}");
-    res.json(data);
+    const { fileName, fileContent } = req.body || {};
+    const result = await aiProvider.analyzeDocument({ fileName, fileContent });
+    res.json(result);
   } catch (error: any) {
-    console.error("Error analyzing document:", error);
-    res.status(500).json({ error: error?.message || "Erreur lors de l'analyse du document" });
+    console.warn("[API] Erreur analyze:", error?.message || error);
+    res.status(500).json({ error: "Erreur lors de l'analyse du document." });
   }
-});
+};
 
-// API Route 5: Auto-Plan Weekly Schedule (ChronoStudy Auto-Planner)
-app.post("/api/gemini/auto-plan", async (req, res) => {
-  if (!checkAi(res)) return;
+app.post("/api/v1/ai/analyze-document", aiRateLimit, handleAnalyzeDoc);
+app.post("/api/gemini/analyze-document", aiRateLimit, handleAnalyzeDoc);
+
+// Auto-Plan Weekly Schedule Handler
+const handleAutoPlan = async (req: express.Request, res: express.Response) => {
   try {
-    const { subjects, targetDailyHours = 4, priorityGoals = "" } = req.body;
-
-    const prompt = `Génère un emploi du temps d'études hebdomadaire équilibré et optimisé sur 7 jours (Lundi au Dimanche) pour l'étudiant.
-Matières: ${subjects.join(", ")}.
-Volume horaire visé: ${targetDailyHours} heures par jour.
-Objectifs prioritaires: ${priorityGoals || "Équilibre global, révisions actives et sessions Pomodoro"}.
-Répartis les créneaux intelligemment entre 'Matin', 'Après-midi', et 'Soir' avec des thèmes précis.`;
-
-    const response = await ai!.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        systemInstruction: "Tu es ChronoAI, le moteur de planification académique intelligent de ChronoStudy.",
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              day: { type: Type.STRING, description: "Jour: Lundi, Mardi, Mercredi, Jeudi, Vendredi, Samedi, Dimanche" },
-              timeSlot: { type: Type.STRING, description: "Créneau: Matin, Après-midi, ou Soir" },
-              subject: { type: Type.STRING, description: "Nom exact de la matière" },
-              topic: { type: Type.STRING, description: "Sujet ou objectif spécifique du créneau" },
-              durationMinutes: { type: Type.NUMBER, description: "Durée en minutes (ex: 60, 90, 120)" }
-            },
-            required: ["day", "timeSlot", "subject", "topic", "durationMinutes"]
-          }
-        }
-      }
-    });
-
-    const data = JSON.parse(response.text || "[]");
-    res.json(data);
+    const { subjects, targetDailyHours, priorityGoals } = req.body || {};
+    const result = await aiProvider.autoPlan({ subjects, targetDailyHours, priorityGoals });
+    // Keep backwards compatibility: return array if expected or result
+    res.json(result.schedule);
   } catch (error: any) {
-    console.error("Error auto-planning schedule:", error);
-    res.status(500).json({ error: error?.message || "Erreur lors de la génération de la planification" });
+    console.warn("[API] Erreur auto-plan:", error?.message || error);
+    res.status(500).json({ error: "Erreur lors de la planification automatique." });
   }
-});
+};
 
-// API Route 6: AI Chrono Study Assistant Chatbot
-app.post("/api/gemini/chat", async (req, res) => {
-  if (!checkAi(res)) return;
+app.post("/api/v1/ai/auto-plan", aiRateLimit, handleAutoPlan);
+app.post("/api/gemini/auto-plan", aiRateLimit, handleAutoPlan);
+
+// AI Chatbot Handler
+const handleChat = async (req: express.Request, res: express.Response) => {
   try {
-    const { message, history = [], userContext = {} } = req.body;
-
-    const contextPrompt = `Contexte de l'étudiant ChronoStudy :
-- Matières étudiées : ${userContext.subjects?.join(", ") || "Mathématiques, Physique, Informatique, Philosophie, Langues"}
-- Tâches en cours : ${userContext.activeTaskTitles?.join("; ") || "Aucune"}
-- Cartes révisées aujourd'hui : ${userContext.cardsReviewed || 0}
-- Documents de cours : ${userContext.documentNames?.join(", ") || "Aucun"}
-
-Tu es l'Assistant IA Global de ChronoStudy, spécialement dédié à l'éducation, à l'apprentissage actif, à l'explication conceptuelle et au soutien de l'étudiant dans l'ensemble de ses devoirs, révisions et projets.
-Fournis des réponses structurées, claires, encourageantes et directes.`;
-
-    const response = await ai!.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [
-        { role: "user", parts: [{ text: contextPrompt }] },
-        ...history.map((h: any) => ({
-          role: h.sender === "user" ? "user" : "model",
-          parts: [{ text: h.text }]
-        })),
-        { role: "user", parts: [{ text: message }] }
-      ],
-      config: {
-        systemInstruction: "Sois concis, structuré, pédagogue avec des explications pas-à-pas, des listes claires et des exemples si utile. Réponds en français."
-      }
-    });
-
-    res.json({ reply: response.text });
+    const { message, history, userContext } = req.body || {};
+    const result = await aiProvider.chat({ message, history, userContext });
+    res.json({ reply: result.reply, provenance: result.provenance, provider: result.provider });
   } catch (error: any) {
-    console.error("Error in AI Chat:", error);
-    res.status(500).json({ error: error?.message || "Erreur de l'Assistant IA ChronoStudy" });
+    console.warn("[API] Erreur chat:", error?.message || error);
+    res.status(500).json({ error: "Erreur de l'Assistant IA ChronoStudy." });
   }
-});
+};
 
-// API Route 7: Generate Complete Study Document or Folder (AI File & Folder Hub)
-app.post("/api/gemini/generate-study-file", async (req, res) => {
-  if (!checkAi(res)) return;
+app.post("/api/v1/ai/chat", aiRateLimit, handleChat);
+app.post("/api/gemini/chat", aiRateLimit, handleChat);
+
+// Complete Study Document / File Generator Handler
+const handleStudyFileGen = async (req: express.Request, res: express.Response) => {
   try {
-    const { promptText, subject, fileType = "text", level = "Lycée / Université" } = req.body;
-
-    const prompt = `Génère un document de cours / fiche de révision académique de haute qualité au format JSON pour ChronoStudy.
-Matière : "${subject || "Général"}"
-Niveau d'étude : "${level}"
-Type de ressource demandée : "${fileType}" (text, audio_script, formulas, exam_prep, folder_structure)
-Instruction / Thème de l'étudiant : "${promptText}"
-
-Retourne un objet JSON valide avec :
-- title : Titre clair et précis du fichier/cours
-- fileName : Nom de fichier avec extension appropriée (ex: "Fiche_Synthese_Thermodynamique.md" ou "Cours_Derivees.txt")
-- fileCategory : "text" | "ia_generated" | "pdf" | "audio"
-- content : Contenu Markdown complet, exhaustif et très bien structuré (titres #, ##, définitions clés, formules, théorèmes, pièges à éviter, 3 questions d'active recall à la fin)
-- summary : Synthèse en 2-3 phrases
-- keyConcepts : Liste des 4 à 6 concepts fondamentaux
-- suggestedChapter : Nom suggéré du chapitre pour classer ce document (ex: "Chapitre 1 : Les Fondamentaux", "Chapitre 3 : Dynamique des Systèmes")
-- tags : Tableau de 3 à 5 mots-clés`;
-
-    const response = await ai!.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        systemInstruction: "Tu es un professeur agrégé et tuteur de méthodologie universitaire. Rédige des fiches de cours complètes, claires, mathématiquement ou scientifiquement rigoureuses et adaptées à l'Active Recall.",
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            fileName: { type: Type.STRING },
-            fileCategory: { type: Type.STRING },
-            content: { type: Type.STRING },
-            summary: { type: Type.STRING },
-            keyConcepts: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
-            },
-            suggestedChapter: { type: Type.STRING },
-            tags: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
-            }
-          },
-          required: ["title", "fileName", "content", "summary", "keyConcepts"]
-        }
-      }
-    });
-
-    const data = JSON.parse(response.text || "{}");
-    res.json(data);
+    const { promptText, subject, fileType, level } = req.body || {};
+    const result = await aiProvider.generateStudyFile({ promptText, subject, fileType, level });
+    res.json(result);
   } catch (error: any) {
-    console.error("Error generating study file:", error);
-    res.status(500).json({ error: error?.message || "Erreur lors de la génération du document IA" });
+    console.warn("[API] Erreur study-file:", error?.message || error);
+    res.status(500).json({ error: "Erreur lors de la génération du document IA." });
   }
+};
+
+app.post("/api/v1/ai/generate-study-file", aiRateLimit, handleStudyFileGen);
+app.post("/api/gemini/generate-study-file", aiRateLimit, handleStudyFileGen);
+
+// ==========================================
+// 7. CENTRALIZED ERROR HANDLING MIDDLEWARE (Section S10)
+// ==========================================
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error("[Server Error]", err?.message || err);
+  if (res.headersSent) return next(err);
+  return res.status(500).json({
+    error: "Une erreur interne est survenue. Veuillez réessayer ultérieurement.",
+  });
 });
 
-// Start Server with Vite or Express static
+// ==========================================
+// 8. VITE / STATIC SERVING
+// ==========================================
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
