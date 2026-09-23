@@ -3,14 +3,15 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { AiProviderService } from "./server/aiProvider";
-import { AuthController, rateLimiter } from "./server/auth";
+import { AuthController, rateLimiter, requireAuth } from "./server/auth";
 import { StorageController } from "./server/storage";
 import { CalendarController } from "./server/calendar";
+import { isSupabaseConfigured } from "./server/supabase";
 
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
 
 // Security: Disable X-Powered-By header (Section S8)
 app.disable("x-powered-by");
@@ -33,6 +34,11 @@ const aiProvider = new AiProviderService();
 const generalRateLimit = rateLimiter(60, 60);
 // AI Endpoints Rate Limiting (20 req / min to prevent cost explosions - Section S5)
 const aiRateLimit = rateLimiter(20, 60);
+const privateRateLimit = [generalRateLimit, requireAuth];
+const privateAiRateLimit = [aiRateLimit, requireAuth];
+const asyncHandler = (handler: express.RequestHandler): express.RequestHandler => {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+};
 
 // ==========================================
 // 1. HEALTH & METRICS
@@ -44,7 +50,7 @@ app.get("/api/health", (req, res) => {
     version: "1.1.0",
     compliance: {
       gdprReady: true,
-      authProvider: "session_token_pbkdf2",
+      authProvider: isSupabaseConfigured() ? "supabase_auth" : "supabase_not_configured",
       offlineCapable: true,
     },
     timestamp: new Date().toISOString(),
@@ -54,47 +60,47 @@ app.get("/api/health", (req, res) => {
 // ==========================================
 // 2. AUTHENTICATION (P0.1, S1, S2)
 // ==========================================
-app.post("/api/v1/auth/register", generalRateLimit, AuthController.register);
-app.post("/api/v1/auth/login", generalRateLimit, AuthController.login);
-app.post("/api/v1/auth/logout", generalRateLimit, AuthController.logout);
-app.get("/api/v1/auth/me", generalRateLimit, AuthController.me);
+app.post("/api/v1/auth/register", generalRateLimit, asyncHandler(AuthController.register));
+app.post("/api/v1/auth/login", generalRateLimit, asyncHandler(AuthController.login));
+app.post("/api/v1/auth/logout", generalRateLimit, asyncHandler(AuthController.logout));
+app.get("/api/v1/auth/me", generalRateLimit, asyncHandler(AuthController.me));
 
 // Backward-compatible auth aliases
-app.post("/api/auth/register", generalRateLimit, AuthController.register);
-app.post("/api/auth/login", generalRateLimit, AuthController.login);
-app.post("/api/auth/logout", generalRateLimit, AuthController.logout);
-app.get("/api/auth/me", generalRateLimit, AuthController.me);
+app.post("/api/auth/register", generalRateLimit, asyncHandler(AuthController.register));
+app.post("/api/auth/login", generalRateLimit, asyncHandler(AuthController.login));
+app.post("/api/auth/logout", generalRateLimit, asyncHandler(AuthController.logout));
+app.get("/api/auth/me", generalRateLimit, asyncHandler(AuthController.me));
 
 // ==========================================
 // 3. STORAGE & GDPR (P0.2, S3, Section 10)
 // ==========================================
-app.get("/api/v1/user/data", generalRateLimit, StorageController.getUserData);
-app.post("/api/v1/user/data", generalRateLimit, StorageController.saveUserData);
-app.get("/api/v1/user/export", generalRateLimit, StorageController.exportUserData);
-app.post("/api/v1/user/purge", generalRateLimit, StorageController.purgeUserData);
+app.get("/api/v1/user/data", privateRateLimit, asyncHandler(StorageController.getUserData));
+app.post("/api/v1/user/data", privateRateLimit, asyncHandler(StorageController.saveUserData));
+app.get("/api/v1/user/export", privateRateLimit, asyncHandler(StorageController.exportUserData));
+app.post("/api/v1/user/purge", privateRateLimit, asyncHandler(StorageController.purgeUserData));
 
 // ==========================================
 // 4. STUDY GROUPS (Section 7.2)
 // ==========================================
-app.get("/api/v1/groups", generalRateLimit, StorageController.getGroups);
-app.post("/api/v1/groups", generalRateLimit, StorageController.createGroup);
-app.post("/api/v1/groups/join", generalRateLimit, StorageController.joinGroup);
-app.post("/api/v1/groups/:id/messages", generalRateLimit, StorageController.postGroupMessage);
-app.post("/api/v1/groups/:id/share-deck", generalRateLimit, StorageController.shareDeckToGroup);
+app.get("/api/v1/groups", privateRateLimit, asyncHandler(StorageController.getGroups));
+app.post("/api/v1/groups", privateRateLimit, asyncHandler(StorageController.createGroup));
+app.post("/api/v1/groups/join", privateRateLimit, asyncHandler(StorageController.joinGroup));
+app.post("/api/v1/groups/:id/messages", privateRateLimit, asyncHandler(StorageController.postGroupMessage));
+app.post("/api/v1/groups/:id/share-deck", privateRateLimit, asyncHandler(StorageController.shareDeckToGroup));
 
 // Backward-compatible groups aliases
-app.get("/api/groups", generalRateLimit, StorageController.getGroups);
-app.post("/api/groups", generalRateLimit, StorageController.createGroup);
-app.post("/api/groups/join", generalRateLimit, StorageController.joinGroup);
-app.post("/api/groups/:id/messages", generalRateLimit, StorageController.postGroupMessage);
-app.post("/api/groups/:id/share-deck", generalRateLimit, StorageController.shareDeckToGroup);
+app.get("/api/groups", privateRateLimit, asyncHandler(StorageController.getGroups));
+app.post("/api/groups", privateRateLimit, asyncHandler(StorageController.createGroup));
+app.post("/api/groups/join", privateRateLimit, asyncHandler(StorageController.joinGroup));
+app.post("/api/groups/:id/messages", privateRateLimit, asyncHandler(StorageController.postGroupMessage));
+app.post("/api/groups/:id/share-deck", privateRateLimit, asyncHandler(StorageController.shareDeckToGroup));
 
 // ==========================================
 // 5. CALENDAR EXPORT (iCal / .ics - Section 7.1 & 11.4)
 // ==========================================
-app.post("/api/v1/calendar/export-ics", generalRateLimit, CalendarController.exportIcs);
-app.post("/api/calendar/export-ics", generalRateLimit, CalendarController.exportIcs);
-app.get("/api/calendar/export-ics", generalRateLimit, CalendarController.exportIcs);
+app.post("/api/v1/calendar/export-ics", privateRateLimit, CalendarController.exportIcs);
+app.post("/api/calendar/export-ics", privateRateLimit, CalendarController.exportIcs);
+app.get("/api/calendar/export-ics", privateRateLimit, CalendarController.exportIcs);
 
 // ==========================================
 // 6. AI PROVIDER ENDPOINTS (P0.3, S6, S7, 11.2)
@@ -120,12 +126,12 @@ const handleFlashcardsGen = async (req: express.Request, res: express.Response) 
   }
 };
 
-app.post("/api/v1/ai/generate-flashcards", aiRateLimit, handleFlashcardsGen);
-app.post("/api/gemini/generate-flashcards", aiRateLimit, handleFlashcardsGen);
-app.post("/api/v1/ai/flashcards", aiRateLimit, handleFlashcardsGen);
-app.post("/api/gemini/flashcards", aiRateLimit, handleFlashcardsGen);
-app.post("/api/v1/ai/generate-deck", aiRateLimit, handleFlashcardsGen);
-app.post("/api/gemini/generate-deck", aiRateLimit, handleFlashcardsGen);
+app.post("/api/v1/ai/generate-flashcards", privateAiRateLimit, handleFlashcardsGen);
+app.post("/api/gemini/generate-flashcards", privateAiRateLimit, handleFlashcardsGen);
+app.post("/api/v1/ai/flashcards", privateAiRateLimit, handleFlashcardsGen);
+app.post("/api/gemini/flashcards", privateAiRateLimit, handleFlashcardsGen);
+app.post("/api/v1/ai/generate-deck", privateAiRateLimit, handleFlashcardsGen);
+app.post("/api/gemini/generate-deck", privateAiRateLimit, handleFlashcardsGen);
 
 // Summary Handler (AIAssistantDrawer)
 const handleSummaryGen = async (req: express.Request, res: express.Response) => {
@@ -139,8 +145,8 @@ const handleSummaryGen = async (req: express.Request, res: express.Response) => 
   }
 };
 
-app.post("/api/v1/ai/generate-summary", aiRateLimit, handleSummaryGen);
-app.post("/api/gemini/generate-summary", aiRateLimit, handleSummaryGen);
+app.post("/api/v1/ai/generate-summary", privateAiRateLimit, handleSummaryGen);
+app.post("/api/gemini/generate-summary", privateAiRateLimit, handleSummaryGen);
 
 // Custom Educational Widget Handler
 const handleWidgetGen = async (req: express.Request, res: express.Response) => {
@@ -154,8 +160,8 @@ const handleWidgetGen = async (req: express.Request, res: express.Response) => {
   }
 };
 
-app.post("/api/v1/ai/generate-widget", aiRateLimit, handleWidgetGen);
-app.post("/api/gemini/generate-widget", aiRateLimit, handleWidgetGen);
+app.post("/api/v1/ai/generate-widget", privateAiRateLimit, handleWidgetGen);
+app.post("/api/gemini/generate-widget", privateAiRateLimit, handleWidgetGen);
 
 // Document Analysis Handler
 const handleAnalyzeDoc = async (req: express.Request, res: express.Response) => {
@@ -169,8 +175,8 @@ const handleAnalyzeDoc = async (req: express.Request, res: express.Response) => 
   }
 };
 
-app.post("/api/v1/ai/analyze-document", aiRateLimit, handleAnalyzeDoc);
-app.post("/api/gemini/analyze-document", aiRateLimit, handleAnalyzeDoc);
+app.post("/api/v1/ai/analyze-document", privateAiRateLimit, handleAnalyzeDoc);
+app.post("/api/gemini/analyze-document", privateAiRateLimit, handleAnalyzeDoc);
 
 // Auto-Plan Weekly Schedule Handler
 const handleAutoPlan = async (req: express.Request, res: express.Response) => {
@@ -185,8 +191,8 @@ const handleAutoPlan = async (req: express.Request, res: express.Response) => {
   }
 };
 
-app.post("/api/v1/ai/auto-plan", aiRateLimit, handleAutoPlan);
-app.post("/api/gemini/auto-plan", aiRateLimit, handleAutoPlan);
+app.post("/api/v1/ai/auto-plan", privateAiRateLimit, handleAutoPlan);
+app.post("/api/gemini/auto-plan", privateAiRateLimit, handleAutoPlan);
 
 // AI Chatbot Handler
 const handleChat = async (req: express.Request, res: express.Response) => {
@@ -200,8 +206,8 @@ const handleChat = async (req: express.Request, res: express.Response) => {
   }
 };
 
-app.post("/api/v1/ai/chat", aiRateLimit, handleChat);
-app.post("/api/gemini/chat", aiRateLimit, handleChat);
+app.post("/api/v1/ai/chat", privateAiRateLimit, handleChat);
+app.post("/api/gemini/chat", privateAiRateLimit, handleChat);
 
 // Complete Study Document / File Generator Handler
 const handleStudyFileGen = async (req: express.Request, res: express.Response) => {
@@ -215,8 +221,8 @@ const handleStudyFileGen = async (req: express.Request, res: express.Response) =
   }
 };
 
-app.post("/api/v1/ai/generate-study-file", aiRateLimit, handleStudyFileGen);
-app.post("/api/gemini/generate-study-file", aiRateLimit, handleStudyFileGen);
+app.post("/api/v1/ai/generate-study-file", privateAiRateLimit, handleStudyFileGen);
+app.post("/api/gemini/generate-study-file", privateAiRateLimit, handleStudyFileGen);
 
 // ==========================================
 // 7. CENTRALIZED ERROR HANDLING MIDDLEWARE (Section S10)
