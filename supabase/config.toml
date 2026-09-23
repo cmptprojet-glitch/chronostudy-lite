@@ -1,6 +1,6 @@
 # ChronoStudy Supabase local/project configuration
 # Set project_id after the project is linked in the Supabase connector.
-project_id = ""
+project_id = "ablrrfrbczhabiwkrfuy"
 
 [functions.ai-chat]
 verify_jwt = true

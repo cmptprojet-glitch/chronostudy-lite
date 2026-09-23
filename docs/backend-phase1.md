@@ -100,3 +100,11 @@ La migration `supabase/migrations/202609230005_storage_vault.sql` prépare deux 
 Les Edge Functions sont organisées sous `supabase/functions` : `ai-chat`, `generate-deck`, `timetable-scan`, `pronote-sync` et `cloud-sync`. Toutes vérifient le JWT Supabase; les secrets sont lus avec `Deno.env.get` et ne sont jamais transmis au client. Les intégrations Pronote et cloud retournent `503` tant que leurs URLs et tokens serveur ne sont pas configurés. Le fichier `supabase/config.toml` active la vérification JWT pour chaque fonction.
 
 Le fichier `src/lib/supabase/database.types.ts` fournit les types locaux pour les tables principales. Lorsque le projet est accessible, le type officiel peut être régénéré avec `SUPABASE_PROJECT_ID=<project-id> npm run supabase:types`; ce script utilise le CLI Supabase et remplace le fichier par le schéma réel de la base.
+
+## Déploiement distant du projet `ablrrfrbczhabiwkrfuy`
+
+Les cinq migrations ont été appliquées au projet Supabase distant dans l’ordre. La vérification distante confirme la présence des 16 tables ChronoStudy avec RLS actif, les policies principales, les buckets privés `course-documents` et `avatars`, ainsi que la fonction Vault `public.set_openai_vault_secret`.
+
+Les cinq Edge Functions sont actives avec `verify_jwt=true` : `ai-chat`, `generate-deck`, `timetable-scan`, `pronote-sync` et `cloud-sync`. Un appel sans JWT à chacune renvoie `401`, ce qui confirme la protection de la plateforme.
+
+Les paramètres Auth publics indiquent que l’inscription email est activée (`disable_signup=false`, `external.email=true`) et que la confirmation automatique est désactivée (`mailer_autoconfirm=false`). Les fournisseurs OAuth Apple, Google, GitHub, Microsoft/Azure et les autres fournisseurs listés restent désactivés et doivent être configurés séparément avec leurs identifiants OAuth.
