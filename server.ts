@@ -8,6 +8,7 @@ import { StorageController } from "./server/storage";
 import { CalendarController } from "./server/calendar";
 import { isSupabaseConfigured } from "./server/supabase";
 import { StudySessionsController } from "./server/studySessions";
+import { FlashcardsController } from "./server/flashcards";
 
 dotenv.config();
 
@@ -112,7 +113,19 @@ app.post("/api/v1/pomodoro/start", privateRateLimit, asyncHandler(StudySessionsC
 app.patch("/api/v1/pomodoro/:id/finish", privateRateLimit, asyncHandler(StudySessionsController.finishPomodoro));
 
 // ==========================================
-// 7. AI PROVIDER ENDPOINTS (P0.3, S6, S7, 11.2)
+// 7. FLASHCARDS, SRS & ANALYTICS
+// ==========================================
+app.get("/api/v1/decks", privateRateLimit, asyncHandler(FlashcardsController.listDecks));
+app.post("/api/v1/decks", privateRateLimit, asyncHandler(FlashcardsController.createDeck));
+app.patch("/api/v1/decks/:id", privateRateLimit, asyncHandler(FlashcardsController.updateDeck));
+app.delete("/api/v1/decks/:id", privateRateLimit, asyncHandler(FlashcardsController.deleteDeck));
+app.post("/api/v1/srs/review", privateRateLimit, asyncHandler(FlashcardsController.reviewCard));
+app.get("/api/v1/analytics/overview", privateRateLimit, asyncHandler(FlashcardsController.analyticsOverview));
+app.get("/api/v1/dashboard/preferences", privateRateLimit, asyncHandler(FlashcardsController.getDashboardPreferences));
+app.put("/api/v1/dashboard/preferences", privateRateLimit, asyncHandler(FlashcardsController.saveDashboardPreferences));
+
+// ==========================================
+// 8. AI PROVIDER ENDPOINTS (P0.3, S6, S7, 11.2)
 // Both /api/v1/ai/* and /api/gemini/* supported!
 // ==========================================
 

@@ -62,6 +62,9 @@ test("les routes privées refusent une requête sans session", async () => {
     ["GET", "/api/v1/groups"],
     ["GET", "/api/v1/study-sessions"],
     ["POST", "/api/v1/pomodoro/start"],
+    ["GET", "/api/v1/decks"],
+    ["POST", "/api/v1/srs/review"],
+    ["GET", "/api/v1/analytics/overview"],
   ];
   for (const [method, path] of paths) {
     const { response } = await api(path, { method });
@@ -133,4 +136,25 @@ test("flux authentifié Supabase: auth, groupes, sessions et Pomodoro", { skip: 
   const sessions = await api("/api/v1/study-sessions", { headers: { cookie: cookies } });
   assert.equal(sessions.response.status, 200, JSON.stringify(sessions.body));
   assert.ok(sessions.body.some((entry) => entry.id === session.body.id));
+
+  const deck = await api("/api/v1/decks", {
+    method: "POST",
+    headers: { cookie: cookies },
+    body: JSON.stringify({ title: `Deck integration ${Date.now()}`, subject: "Tests", cards: [{ cardKey: "card-1", question: "2+2 ?", answer: "4" }] }),
+  });
+  assert.equal(deck.response.status, 201, JSON.stringify(deck.body));
+  assert.ok(deck.body.id);
+  assert.equal(deck.body.cards.length, 1);
+
+  const review = await api("/api/v1/srs/review", {
+    method: "POST",
+    headers: { cookie: cookies },
+    body: JSON.stringify({ deckId: deck.body.id, cardKey: "card-1", quality: 5 }),
+  });
+  assert.equal(review.response.status, 200, JSON.stringify(review.body));
+  assert.equal(review.body.success, true);
+
+  const analytics = await api("/api/v1/analytics/overview", { headers: { cookie: cookies } });
+  assert.equal(analytics.response.status, 200, JSON.stringify(analytics.body));
+  assert.ok(analytics.body.totals);
 });

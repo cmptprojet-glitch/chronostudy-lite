@@ -86,3 +86,9 @@ TEST_AUTH_EMAIL=compte-de-test@domaine.fr \
 TEST_AUTH_PASSWORD='mot-de-passe-de-test' \
 npm run test:integration
 ```
+
+## Lot P2 — flashcards, SRS et analytics
+
+La migration `supabase/migrations/202609230004_flashcards_analytics.sql` ajoute la table normalisée `flashcards`, les agrégats journaliers `analytics_daily` et les préférences `dashboard_preferences`, avec RLS propriétaire. La table `flashcard_decks` existante reste le conteneur de deck; les cartes sont désormais stockées dans `flashcards` et la progression dans `srs_progress`.
+
+Les routes ajoutées sont `GET/POST /api/v1/decks`, `PATCH/DELETE /api/v1/decks/:id`, `POST /api/v1/srs/review`, `GET /api/v1/analytics/overview` et `GET/PUT /api/v1/dashboard/preferences`. Une révision applique un calcul SRS de type SM-2 simplifié, met à jour `srs_progress` et incrémente `analytics_daily`.
