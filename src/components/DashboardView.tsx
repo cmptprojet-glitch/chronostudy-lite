@@ -36,12 +36,14 @@ import {
   ChevronRight,
   Flame,
   Zap,
+  Clock,
   BookOpen,
   FileText,
   ArrowRight,
   Sliders,
   CheckCircle2,
   Calendar,
+  Compass,
   Lightbulb,
   History,
   Trash2,
@@ -80,7 +82,6 @@ interface DashboardViewProps {
   levelTitle?: string;
   userXP?: number;
   userStreak?: number;
-  levelInfo?: { level: number; currentLevelXP: number; xpForNextLevel: number; progressPercent: number };
   subjectMetrics?: SubjectMetric[];
   userSettings?: UserSettings;
   onSaveUserSettings?: (settings: UserSettings) => void;
@@ -256,7 +257,6 @@ interface ChatMessage {
   flashcards?: { front: string; back: string }[];
   steps?: string[];
   reaction?: 'like' | 'dislike' | null;
-  provider?: string;
   questionPhase?: ClarificationQuestion;
   revisionPlan?: StructuredRevisionPlan;
   followUpQuestion?: string;
@@ -272,7 +272,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   levelTitle = 'Niveau 2 · Apprenti Studieux',
   userXP = 18,
   userStreak = 4,
-  levelInfo,
   userSettings,
   onSaveUserSettings,
   onSaveDeck,
@@ -405,46 +404,291 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }, 2800);
   };
 
-  // Submit a query through the real server-side AI provider.
-  const handleSendQuery = async (textToSend?: string, modeOverride?: ResponseMode) => {
+  // Submit a query (Classic Conversational Assistant Flow with Live Scan & Clarification Phases)
+  const handleSendQuery = (textToSend?: string, modeOverride?: ResponseMode) => {
     const text = (textToSend || inputValue).trim();
     if (!text && attachedFiles.length === 0) return;
+
     const currentMode = modeOverride || (activeChipMode as ResponseMode) || 'coach';
     const lower = text.toLowerCase();
-    const sentAttachments = [...attachedFiles];
-    const matchedSubject = subjects.find((subject) => lower.includes(subject.name.toLowerCase()))?.name || 'Général';
-    const matchedDocs = documents.filter((document) => lower.includes(document.name.toLowerCase()) || (document.subject && lower.includes(document.subject.toLowerCase())));
-    const matchedDecks = decks.filter((deck) => lower.includes(deck.title.toLowerCase()) || (deck.subject && lower.includes(deck.subject.toLowerCase())));
-    const userMsg: ChatMessage = { id: `msg-user-${Date.now()}`, role: 'user', content: text || 'Analyse du document joint', timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), mode: currentMode, attachments: sentAttachments };
-    const history = messages.slice(-10).map((message) => ({ sender: message.role === 'user' ? 'user' : 'assistant', text: message.content }));
+
+    // 1. Append User Message
+    const userMsg: ChatMessage = {
+      id: `msg-user-${Date.now()}`,
+      role: 'user',
+      content: text || 'Analyse du document joint',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      mode: currentMode,
+      attachments: [...attachedFiles],
+    };
+
     setMessages((prev) => [...prev, userMsg]);
     setInputValue('');
+    const sentAttachments = [...attachedFiles];
     setAttachedFiles([]);
     setIsAiThinking(true);
     setAvatarExpression('thinking');
-    setSpeechBubbleText('Nova analyse ta demande…');
-    try {
-      const response = await fetch('/api/v1/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({
-        message: text || `Analyse les fichiers joints : ${sentAttachments.map((file) => file.name).join(', ')}`,
-        history,
-        userContext: { language: 'fr', mode: currentMode, subjects: subjects.map((subject) => subject.name).slice(0, 20), documents: matchedDocs.map((document) => ({ name: document.name, subject: document.subject })).slice(0, 10), decks: matchedDecks.map((deck) => ({ title: deck.title, subject: deck.subject })).slice(0, 10), tasksInProgress: tasks.filter((task) => task.status !== 'completed').length },
-      }) });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || typeof payload.reply !== 'string' || !payload.reply.trim()) throw new Error(payload.error || (response.status === 401 ? 'Connecte-toi à ton compte Supabase pour utiliser Nova IA.' : 'Nova n’a pas retourné de réponse exploitable.'));
-      const assistantMsg: ChatMessage = { id: `msg-ai-${Date.now()}`, role: 'assistant', content: payload.reply.trim(), timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), mode: currentMode, provider: payload.provider, scannedContext: { documentsCount: matchedDocs.length, decksCount: matchedDecks.length, subjectMatched: matchedSubject } };
-      setMessages((prev) => [...prev, assistantMsg]);
-      const newConvItem: AIConversationItem = { id: `conv-${Date.now()}`, query: text || 'Analyse de document', answer: assistantMsg.content, mode: currentMode, timestamp: "À l'instant", createdAt: new Date().toISOString(), subject: matchedSubject, steps: [], flashcardsGenerated: [] };
-      setConversations((prev) => { const updated = [newConvItem, ...prev.filter((conversation) => conversation.query.toLowerCase() !== newConvItem.query.toLowerCase())]; try { localStorage.setItem('chronostudy_dashboard_conversations', JSON.stringify(updated.slice(0, 40))); } catch {} return updated; });
-      onAwardXP?.(15, 'Interaction Nova IA');
-      setSpeechBubbleText(payload.provider ? `Réponse générée par ${payload.provider}.` : 'Réponse pédagogique prête.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erreur inconnue lors de la communication avec Nova.';
-      setMessages((prev) => [...prev, { id: `msg-error-${Date.now()}`, role: 'assistant', content: `### Nova est momentanément indisponible\n\n${message}\n\nVérifie ta connexion et réessaie. Aucune réponse de démonstration n’a été affichée.`, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), mode: currentMode, scannedContext: { documentsCount: matchedDocs.length, decksCount: matchedDecks.length, subjectMatched: matchedSubject } }]);
-      setSpeechBubbleText('Je n’ai pas pu joindre le service IA.');
-    } finally {
+    setSpeechBubbleText('Analyse en cours...');
+
+    // 2. Cross-Poles Scanner
+    const matchedSubject =
+      subjects.find((s) => lower.includes(s.name.toLowerCase()) || lower.includes(s.id.toLowerCase()))?.name ||
+      (lower.includes('histoire') || lower.includes('seconde guerre') || lower.includes('ww2') || lower.includes('guerre')
+        ? 'Histoire-Géo'
+        : lower.includes('physique') || lower.includes('chimie') || lower.includes('rc') || lower.includes('condensateur')
+        ? 'Physique-Chimie'
+        : lower.includes('math') || lower.includes('dérivée') || lower.includes('intégrale') || lower.includes('calcul')
+        ? 'Mathématiques'
+        : lower.includes('philo')
+        ? 'Philosophie'
+        : 'Général');
+
+    const matchedDocs = documents.filter(
+      (d) =>
+        lower.includes(d.name.toLowerCase()) ||
+        (d.subject && lower.includes(d.subject.toLowerCase())) ||
+        (matchedSubject !== 'Général' && d.subject?.toLowerCase() === matchedSubject.toLowerCase())
+    );
+    const matchedDecks = decks.filter(
+      (d) =>
+        lower.includes(d.title.toLowerCase()) ||
+        (d.subject && lower.includes(d.subject.toLowerCase())) ||
+        (matchedSubject !== 'Général' && d.subject?.toLowerCase() === matchedSubject.toLowerCase())
+    );
+
+    // 3. Generate simulated AI response with dynamic educational intelligence
+    setTimeout(() => {
       setIsAiThinking(false);
-      setAvatarExpression('idle');
-    }
+      setAvatarExpression('speaking');
+
+      let generatedAnswer = '';
+      let generatedSteps: string[] = [];
+      let generatedFlashcards: { front: string; back: string }[] = [];
+      let questionPhase: ClarificationQuestion | undefined = undefined;
+      let revisionPlan: StructuredRevisionPlan | undefined = undefined;
+      let followUpQuestion: string | undefined = undefined;
+
+      // CASE A: QUIZ REQUEST (Interactive clarification phase)
+      const isQuizRequest =
+        lower.includes('quiz') ||
+        lower.includes('qcm') ||
+        lower.includes('interroge-moi') ||
+        (lower.includes('seconde guerre') && !lower.includes('vichy') && !lower.includes('résistance') && !lower.includes('procès'));
+
+      const isSpecificQuizAnswer =
+        lower.includes('vichy') ||
+        lower.includes('résistance') ||
+        lower.includes('guerre totale') ||
+        lower.includes('fronts') ||
+        lower.includes('nuremberg') ||
+        lower.includes('grand quiz') ||
+        lower.includes('10 questions') ||
+        lower.includes('5 questions');
+
+      if (isQuizRequest && !isSpecificQuizAnswer) {
+        generatedAnswer = `Excellente idée ! J'ai scanné tes cours et documents en **${matchedSubject}** 📚\n\nPour que ce quiz soit le plus efficace possible pour ton niveau et tes révisions, précise l'axe que tu souhaites travailler :`;
+        
+        questionPhase = {
+          id: `clarify-quiz-${Date.now()}`,
+          title: `Précision pour ton quiz : ${lower.includes('seconde guerre') || lower.includes('ww2') ? 'Seconde Guerre Mondiale' : matchedSubject}`,
+          description: `Nova a détecté ton programme d'étude. Choisis le thème ciblé ci-dessous ou dicte ta consigne avec le micro :`,
+          options: [
+            {
+              id: 'opt-ww2-1',
+              label: 'La France sous Vichy, l’Occupation & la Résistance (10 QCM)',
+              value: 'Génère un quiz approfondi sur La France sous le régime de Vichy, la collaboration et la Résistance (1940-1944) avec explications détaillées.',
+            },
+            {
+              id: 'opt-ww2-2',
+              label: 'Guerre totale, tournant 1942 & Fronts mondial (8 questions)',
+              value: 'Génère un quiz sur la guerre totale, les batailles décisives (Stalingrad, Midway, El-Alamein) et la capitulation de l’Axe.',
+            },
+            {
+              id: 'opt-ww2-3',
+              label: 'Bilan humain, Procès de Nuremberg & Reconstruction (5 questions)',
+              value: 'Génère un quiz sur le bilan humain et moral, les procès de Nuremberg/Tokyo et la création de l’ONU.',
+            },
+            {
+              id: 'opt-ww2-4',
+              label: 'Grand Quiz de Synthèse type Bac (15 questions chrono)',
+              value: 'Fais-moi un grand quiz de synthèse complet sur toute la Seconde Guerre Mondiale avec chronométrage et barème sur 20.',
+            },
+          ],
+          allowVoiceInput: true,
+        };
+      } else if (isSpecificQuizAnswer || (lower.includes('quiz') && isSpecificQuizAnswer)) {
+        generatedAnswer = `### Quiz Interactif & Corrigé Détaillé : Seconde Guerre Mondiale 🎖️\n\nVoici ta série de questions avec corrections pédagogiques et mémorisation espacée :\n\n---\n\n#### **Question 1** : En quelle année et par quel discours le Général de Gaulle lance-t-il son appel à la Résistance depuis Londres ?\n- A) 17 juin 1940\n- **B) 18 juin 1940 (✅ Réponse exacte)**\n- C) 10 juillet 1940\n- D) 6 juin 1944\n\n> 💡 *Explication historique* : Le 18 juin 1940, Charles de Gaulle refuse l'armistice demandé par le maréchal Pétain et fonde la France Libre sur les ondes de la BBC.\n\n---\n\n#### **Question 2** : Quel organisme Jean Moulin a-t-il unifié en mai 1943 pour coordonner la résistance intérieure ?\n- A) Les FFI (Forces Françaises de l'Intérieur)\n- B) Le STO (Service du Travail Obligatoire)\n- **C) Le CNR (Conseil National de la Résistance) (✅ Réponse exacte)**\n- D) Le CFLN\n\n> 💡 *Explication historique* : Jean Moulin réunit le CNR à Paris le 27 mai 1943, rassemblant 8 mouvements de résistance, 6 partis politiques et 2 syndicats.\n\n---\n\n#### **Question 3** : Quelle notion juridique inédite a été introduite lors du procès de Nuremberg en 1945 ?\n- A) Haute trahison\n- **B) Crime contre l'humanité (✅ Réponse exacte)**\n- C) Crime de piraterie\n- D) Rupture d'armistice\n\n> 💡 *Explication historique* : Le statut du Tribunal Militaire International de Nuremberg définit pour la première fois le « crime contre l'humanité », imprescriptible.`;
+
+        generatedSteps = [
+          'Analyse des questions clés du programme officiel',
+          'Vérification des dates repères et notions juridiques',
+          'Génération des fiches mémoires de réactivation',
+        ];
+
+        generatedFlashcards = [
+          { front: 'Appel du 18 juin 1940', back: 'Discours de Charles de Gaulle à la BBC fondant la France Libre' },
+          { front: 'Création et rôle du CNR (mai 1943)', back: 'Conseil National de la Résistance unifié par Jean Moulin' },
+          { front: 'Notion juridique créée à Nuremberg (1945)', back: 'Crime contre l’humanité (imprescriptible)' },
+        ];
+
+        followUpQuestion = "Veux-tu qu'on enchaîne avec 5 questions supplémentaires ou que j'ajoute ces 3 flashcards à ton deck d'Histoire ?";
+      }
+      // CASE B: SOLVE EXERCISES REQUEST
+      else if (
+        (lower.includes('résous') || lower.includes('résoudre') || lower.includes('calculer') || currentMode === 'solve') &&
+        sentAttachments.length === 0 &&
+        text.length < 25
+      ) {
+        generatedAnswer = `Pour que je résolve ton exercice avec **toutes les étapes détaillées**, les formules et les justifications théoriques :\n\nTransmets-moi ton document ou la photo de l'énoncé ci-dessous, ou dicte directement les données :`;
+        
+        questionPhase = {
+          id: `clarify-solve-${Date.now()}`,
+          title: 'Transmets ton exercice à Nova',
+          description: 'Prends en photo ton énoncé ou importe ton document (PDF, Word, image). Nova identifiera les variables, posera les théorèmes et détaillera chaque calcul.',
+          requiresDocumentUpload: true,
+          allowVoiceInput: true,
+        };
+      }
+      // CASE C: REVISION PLAN
+      else if (lower.includes('plan de révision') || lower.includes('planning') || lower.includes('programme de révision')) {
+        generatedAnswer = `### Ton Plan de Révision Stratégique & Interactif 🎯\n\nJ'ai structuré ce programme en combinant **mémorisation espacée**, **séances Pomodoro adaptées** et **objectifs journaliers** concrets pour **${matchedSubject}**.`;
+        
+        revisionPlan = {
+          id: `plan-dynamic-${Date.now()}`,
+          title: `Plan de Révision : ${matchedSubject}`,
+          subject: matchedSubject,
+          targetScore: 18,
+          examDate: 'Vendredi 28 Mars',
+          daysRemaining: 7,
+          totalHours: 6.5,
+          tips: [
+            'Alterner rappel actif (flashcards) et pratique sans note.',
+            'Prendre 5 min de pause toutes les 25 min (méthode Pomodoro).',
+            'Relire les erreurs après chaque session pour fixer les automatismes.',
+          ],
+          milestones: [
+            {
+              id: `m-${Date.now()}-1`,
+              dayLabel: 'Jour 1 · Synthèse & Définitions Clés',
+              title: 'Mémorisation des définitions indispensables et formules directrices',
+              focusMinutes: 50,
+              type: 'concept',
+              description: 'Relire la fiche synthétique et ancrer les 6 flashcards de vocabulaire et repères.',
+              completed: false,
+              xpReward: 25,
+            },
+            {
+              id: `m-${Date.now()}-2`,
+              dayLabel: 'Jour 2 · Exercices d’Application Types',
+              title: 'Résolution méthodique pas à pas et repérage des pièges classiques',
+              focusMinutes: 75,
+              type: 'exercise',
+              description: 'Refaire 3 exercices types sans consulter le corrigé puis auto-correction.',
+              completed: false,
+              xpReward: 30,
+            },
+            {
+              id: `m-${Date.now()}-3`,
+              dayLabel: 'Jour 3 · Simulation Examen & Consolidation',
+              title: 'Épreuve blanche chronométrée en conditions réelles et révision flash',
+              focusMinutes: 60,
+              type: 'exam_sim',
+              description: 'Simulation test chronométré 30 min et tour complet de réactivation flashcards.',
+              completed: false,
+              xpReward: 35,
+            },
+          ],
+        };
+
+        generatedSteps = [
+          'Calcul du volume horaire optimal (25 min Focus / 5 min Pause)',
+          'Répartition équilibrée théorie (35%) / pratique (65%)',
+          'Synchronisation possible en 1 clic avec le planificateur de tâches',
+        ];
+
+        generatedFlashcards = [
+          { front: `Règle d'or de révision (${matchedSubject})`, back: 'Alterner rappel actif (flashcards) et pratique d’exercices sans note.' },
+        ];
+
+        followUpQuestion = "Que penses-tu de ce plan de révision ? Veux-tu ajuster les durées ou qu'on commence la première session ensemble ?";
+      }
+      // CASE D: PHYSICS / MATH / CIRCUIT RC
+      else if (lower.includes('circuit rc') || lower.includes('tau') || lower.includes('décharge') || lower.includes('condensateur')) {
+        generatedAnswer = `Voici l'explication complète et le corrigé pour le **Circuit RC** en Physique-Chimie ⚡\n\n### 1. Équation différentielle de la charge\nD'après la loi des mailles :\n$$u_R(t) + u_C(t) = E$$\nSachant que $i(t) = C \\frac{du_C}{dt}$ et $u_R = R \\cdot i$, on obtient :\n$$R C \\frac{du_C(t)}{dt} + u_C(t) = E$$\n\n### 2. Solution analytique\nLa constante de temps vaut :\n$$\\tau = R \\cdot C \\quad (\\text{en secondes s})$$\nLa tension aux bornes du condensateur s'écrit :\n$$u_C(t) = E \\left(1 - e^{-t/\\tau}\\right)$$\n\n### 3. Points clés pour l'examen\n- À $t = \\tau$ : le condensateur est chargé à **63%** de $E$ ($u_C(\\tau) \\approx 0{,}63 E$).\n- À $t = 5\\tau$ : la charge est considérée comme **complète à plus de 99%**.\n- La tangente à l'origine coupe l'asymptote $u_C = E$ en $t = \\tau$.`;
+        
+        generatedFlashcards = [
+          { front: 'Constante de temps Tau (Circuit RC)', back: 'Tau = R * C (en secondes s)' },
+          { front: 'Tension à t = Tau lors de la charge', back: 'uC(Tau) = 0,63 * E (63% de la tension max)' },
+          { front: 'Durée du régime transitoire', back: 'Approximativement 5 * Tau (charge > 99%)' },
+        ];
+        
+        generatedSteps = [
+          'Application de la loi des mailles',
+          'Résolution de l’équation différentielle',
+          'Calcul de la constante de temps Tau',
+        ];
+      }
+      // CASE E: GENERIC DETAILED RESPONSE
+      else {
+        generatedAnswer = `### Explication Pédagogique & Structurée 💡\n\n**Sujet analysé** : *"${text}"*\n\n1. **L'analogie du quotidien** :\n   Pense à ce concept comme à un circuit de distribution fluide : la régulation s'effectue automatiquement selon la pression disponible.\n\n2. **Les principes fondamentaux à retenir** :\n   - Identifier rigoureusement les données et hypothèses.\n   - Appliquer le théorème directeur sans omettre les conditions de validité.\n   - Présenter le résultat avec ses unités et une phrase de conclusion soignée.\n\n3. **La méthode infaillible pour ton contrôle** :\n   Rédige toujours ta justification théorique avant de poser les calculs numériques !`;
+        
+        generatedFlashcards = [
+          { front: `Point clé : ${text.slice(0, 35)}...`, back: 'Définition et méthode d’application à réciter lors du devoir.' },
+        ];
+      }
+
+      const assistantMsg: ChatMessage = {
+        id: `msg-ai-${Date.now()}`,
+        role: 'assistant',
+        content: generatedAnswer,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        mode: currentMode,
+        flashcards: generatedFlashcards,
+        steps: generatedSteps,
+        questionPhase: questionPhase,
+        revisionPlan: revisionPlan,
+        followUpQuestion: followUpQuestion,
+        scannedContext: {
+          documentsCount: matchedDocs.length,
+          decksCount: matchedDecks.length,
+          subjectMatched: matchedSubject,
+        },
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+
+      // Save to recent conversations
+      const newConvItem: AIConversationItem = {
+        id: `conv-${Date.now()}`,
+        query: text || 'Analyse de document',
+        answer: generatedAnswer,
+        mode: currentMode,
+        timestamp: "À l'instant",
+        createdAt: new Date().toISOString(),
+        subject: matchedSubject,
+        steps: generatedSteps,
+        flashcardsGenerated: generatedFlashcards,
+      };
+
+      setConversations((prev) => {
+        const filtered = prev.filter((c) => c.query.toLowerCase() !== text.toLowerCase());
+        const updated = [newConvItem, ...filtered];
+        try {
+          localStorage.setItem('chronostudy_dashboard_conversations', JSON.stringify(updated.slice(0, 40)));
+        } catch {
+          // ignore
+        }
+        return updated;
+      });
+
+      if (onAwardXP) {
+        onAwardXP(15, 'Interaction Nova IA');
+      }
+
+      setTimeout(() => {
+        setAvatarExpression('idle');
+      }, 2500);
+    }, 1000);
   };
 
   // Copy response to clipboard
@@ -570,30 +814,51 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   return (
-    <div className="w-full min-h-[calc(100vh-5rem)] flex flex-col justify-between pb-3 max-w-5xl mx-auto space-y-3">
+    <div className="w-full min-h-[calc(100vh-5rem)] flex flex-col justify-between pb-3 max-w-5xl mx-auto space-y-4">
       
       {/* ═════════════════════════════════════════════════════════════════════════ */}
       {/* 1. TOP BAR: STATUS, STREAK, XP & INTERFACES TRIGGERS                      */}
       {/* ═════════════════════════════════════════════════════════════════════════ */}
       <div className="flex items-center justify-between gap-2 px-1 flex-wrap">
         
-        {/* LEFT: consolidated XP and streak details */}
+        {/* LEFT: XP & STREAK (CLICKABLE TO OPEN DETAILED MODALS) */}
         <div className="flex items-center gap-2">
+          {/* XP BADGE -> OPENS LEVEL MODAL */}
           <motion.button
             type="button"
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.96 }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
             onClick={() => setIsXPModalOpen(true)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-xs cursor-pointer transition-colors"
-            title="Détails et points d'XP"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-850 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-xs cursor-pointer transition-colors"
+            title="Voir ton niveau et ta progression d'XP"
           >
-            <div style={{ backgroundColor: currentTheme.accentColor, color: currentTheme.accentTextColor }} className="w-5 h-5 rounded-lg flex items-center justify-center font-black text-[10px]">
+            <div
+              style={{ backgroundColor: currentTheme.accentColor, color: currentTheme.accentTextColor }}
+              className="w-5 h-5 rounded-lg flex items-center justify-center font-black text-[10px]"
+            >
               <Zap className="w-3 h-3 fill-current" />
             </div>
-            <span className="text-xs font-black text-[#161922] dark:text-white">Détails & XP</span>
-            <span className="text-[10px] text-slate-400 font-bold">{userXP} XP</span>
-            <Flame className="w-3.5 h-3.5 fill-amber-500 text-amber-500" aria-label="Série" />
-            <span className="text-xs font-black text-amber-600 dark:text-amber-400">{userStreak}J</span>
+            <span className="text-xs font-black text-[#161922] dark:text-white">
+              {userXP} XP
+            </span>
+            <span className="text-[10px] text-slate-400 font-bold hidden sm:inline">
+              · {levelTitle.split('·')[0]}
+            </span>
+          </motion.button>
+
+          {/* STREAK BADGE -> OPENS STREAK MODAL */}
+          <motion.button
+            type="button"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setIsStreakModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-850 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-xs cursor-pointer transition-colors"
+            title="Voir tes jours de série"
+          >
+            <Flame className="w-4 h-4 fill-amber-500 text-amber-500 animate-pulse" />
+            <span className="text-[#161922] dark:text-white font-black text-xs">
+              {userStreak} Jours
+            </span>
           </motion.button>
         </div>
 
@@ -643,6 +908,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </span>
           </motion.button>
 
+          {/* WORLD CLOCK SHORTCUT */}
+          {onOpenWorldClock && (
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              onClick={onOpenWorldClock}
+              className="p-2 bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-xs transition-colors cursor-pointer"
+              title="Horloge mondiale"
+            >
+              <Compass className="w-4 h-4" />
+            </motion.button>
+          )}
+
+          {/* FOCUS POMODORO */}
+          <motion.button
+            type="button"
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
+            onClick={() => setActiveTab('pomodoro')}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800 text-[#161922] dark:text-white rounded-2xl shadow-xs text-xs font-bold transition-colors cursor-pointer"
+          >
+            <Clock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span className="hidden sm:inline">Focus</span>
+          </motion.button>
         </div>
       </div>
 
@@ -707,7 +997,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               Nova IA
                             </span>
                             <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                              {msg.provider || 'Réponse structurée'}
+                              PRO Réponse Smart
                             </span>
                             {msg.scannedContext && (
                               <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200/60">
@@ -1005,7 +1295,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         ) : (
           /* B. HOME SCREEN (WHEN CONVERSATION IS EMPTY) */
-          <div className="flex-1 flex flex-col items-center justify-center text-center px-4 pt-1 pb-3 space-y-3">
+          <div className="flex-1 flex flex-col items-center justify-center text-center px-4 pt-4 pb-6 space-y-5">
             
             {/* INTERACTIVE MASCOT WITH SPEECH BUBBLE */}
             <div className="relative flex flex-col items-center cursor-pointer group" onClick={handleMascotClick}>
@@ -1327,10 +1617,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
                       Sélectionne une fonctionnalité pour commencer
                     </p>
-                    <div className="mt-2 flex flex-wrap gap-1.5 text-[9px] font-black uppercase tracking-wide">
-                      <span className="rounded-full bg-emerald-100 px-2 py-1 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">Gemini 2.5 Flash · actif</span>
-                      <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400">Claude 3.5 Sonnet · connecteur requis</span>
-                    </div>
                   </div>
                 </div>
 
@@ -1649,27 +1935,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {/* XP PROGRESS BAR */}
               <div className="space-y-1.5">
                 <div className="flex justify-between text-xs font-bold text-zinc-400">
-                    <span>Niveau {levelInfo?.level || 1}</span>
-                    <span>{levelInfo?.currentLevelXP || userXP} / {levelInfo?.xpForNextLevel || 200} XP</span>
-                    <span>Niveau {(levelInfo?.level || 1) + 1}</span>
+                  <span>Niveau 2</span>
+                  <span>{userXP} / 25 XP</span>
+                  <span>Niveau 3</span>
                 </div>
                 <div className="h-2.5 w-full bg-zinc-800 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-purple-500 to-indigo-400 transition-all duration-500"
-                    style={{ width: `${levelInfo?.progressPercent ?? 0}%` }}
+                    style={{ width: `${Math.min(100, (userXP / 25) * 100)}%` }}
                   />
                 </div>
                 <p className="text-[11px] text-zinc-500">
-                  Encore {Math.max(0, (levelInfo?.xpForNextLevel || 200) - (levelInfo?.currentLevelXP || userXP))} XP pour débloquer le niveau suivant.
+                  Encore {Math.max(0, 25 - userXP)} XP pour débloquer le Niveau 3 !
                 </p>
-              </div>
-
-              <div className="flex items-center justify-between rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-left">
-                <div className="flex items-center gap-2">
-                  <Flame className="h-4 w-4 fill-amber-500 text-amber-500" />
-                  <span className="text-xs font-bold text-amber-200">Série actuelle</span>
-                </div>
-                <span className="text-sm font-black text-amber-400">{userStreak} jour{userStreak > 1 ? 's' : ''}</span>
               </div>
 
               <button

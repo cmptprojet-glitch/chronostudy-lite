@@ -60,11 +60,13 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, subjectMetri
       acc[log.subject] = current;
       return acc;
     }, {});
+    const completedTasks = tasks.filter((task) => task.status === 'completed').length;
+    const cards = decks.reduce((sum, deck) => sum + deck.cards.length, 0);
+    const masteredCards = decks.reduce((sum, deck) => sum + deck.cards.filter((card) => card.lastEvaluated === 'easy').length, 0);
     const daily = Object.values(dailyMap).sort((a, b) => a.day.localeCompare(b.day)).slice(-period);
     return {
       periodDays: period,
-      // Deck/task fixtures are not analytics events. Only persisted study logs may be used offline.
-      totals: { focusedMinutes: logs.reduce((sum, log) => sum + log.durationMinutes, 0), sessionsCompleted: logs.length, cardsReviewed: 0, cardsMastered: 0, xpEarned: 0 },
+      totals: { focusedMinutes: logs.reduce((sum, log) => sum + log.durationMinutes, 0), sessionsCompleted: logs.length, cardsReviewed: cards, cardsMastered: masteredCards, xpEarned: completedTasks * 10 },
       currentStreak: 0,
       daily,
       subjects: Object.values(subjectsMap).sort((a, b) => b.minutes - a.minutes),
@@ -93,7 +95,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ logs, subjectMetri
   const analytics = data || fallback;
   const maxMinutes = Math.max(1, ...analytics.daily.map((point) => point.focusedMinutes));
   const maxSubjectMinutes = Math.max(1, ...analytics.subjects.map((subject) => subject.minutes));
-  const taskCompletion = data && tasks.length ? Math.round((tasks.filter((task) => task.status === 'completed').length / tasks.length) * 100) : 0;
+  const taskCompletion = tasks.length ? Math.round((tasks.filter((task) => task.status === 'completed').length / tasks.length) * 100) : 0;
   const mastery = analytics.totals.cardsReviewed ? Math.round((analytics.totals.cardsMastered / analytics.totals.cardsReviewed) * 100) : 0;
   const productivityScore = Math.min(100, Math.round(analytics.totals.focusedMinutes / 6 + taskCompletion * 0.25 + mastery * 0.15 + analytics.pomodoro.completed * 2));
   const heatmap = Array.from({ length: Math.min(35, analytics.daily.length) }, (_, index) => analytics.daily[Math.max(0, analytics.daily.length - Math.min(35, analytics.daily.length) + index)]);

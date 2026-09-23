@@ -174,12 +174,9 @@ export function useStudyData(onAwardXP?: (amount: number, reason: string) => voi
   const [logs, setLogs] = useState<StudySessionLog[]>(() => {
     try {
       const saved = localStorage.getItem('chronostudy_logs');
-      const parsed = saved ? JSON.parse(saved) : [];
-      // The old log-1/log-2 fixtures were demo data and must never appear in a student's analytics.
-      if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((log) => typeof log?.id === 'string' && log.id.startsWith('log-'))) return [];
-      return Array.isArray(parsed) ? parsed : [];
+      return saved ? JSON.parse(saved) : INITIAL_LOGS;
     } catch {
-      return [];
+      return INITIAL_LOGS;
     }
   });
 

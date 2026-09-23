@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TabType, Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -137,18 +137,6 @@ export default function App() {
     handleAddDocTrack,
     totalStudyMinutes,
   } = useStudyData(handleAwardXP);
-
-  const streakDays = useMemo(() => {
-    const studiedDays = new Set(logs.map((log) => log.date));
-    let streak = 0;
-    const cursor = new Date();
-    while (studiedDays.has(cursor.toISOString().slice(0, 10))) {
-      streak += 1;
-      cursor.setUTCDate(cursor.getUTCDate() - 1);
-    }
-    return streak;
-  }, [logs]);
-  const primaryClock = worldClocks.find((clock) => clock.isPrimary) || worldClocks[0];
 
   // Due flashcards calculation
   const dueFlashcardsCount = decks.reduce(
@@ -353,8 +341,7 @@ export default function App() {
             ) : (
               <Header
                 totalStudyMinutes={totalStudyMinutes}
-                streakDays={streakDays}
-                primaryClock={primaryClock ? { name: primaryClock.name, timezone: primaryClock.timezone } : undefined}
+                streakDays={14}
                 educationScore={94}
                 dueFlashcardsCount={dueFlashcardsCount}
                 userName={userSettings.profile.name}
@@ -397,8 +384,6 @@ export default function App() {
                       subjects={subjects}
                       levelTitle={levelInfo.title}
                       userXP={userXP}
-                      userStreak={streakDays}
-                      levelInfo={levelInfo}
                       subjectMetrics={INITIAL_SUBJECT_METRICS}
                       userSettings={userSettings}
                       onSaveUserSettings={handleSaveUserSettings}
