@@ -1,0 +1,58 @@
+# ChronoStudy — Backend Phase 1
+
+## État du lot
+
+Cette branche livre le socle de sécurisation local et la migration Supabase préparatoire du blueprint V11.
+
+### Livré
+
+- Authentification Express durcie avec cookie de session `HttpOnly`, `SameSite=Lax` et `Secure` en production.
+- Support conservé du header `Authorization: Bearer` pour la compatibilité des clients existants.
+- Middleware `requireAuth` appliqué aux données utilisateur, groupes, export/purge RGPD, calendrier et endpoints IA.
+- Suppression des identifiants `sessionId` fournis par le client pour choisir la cible de données.
+- Suppression du compte de démonstration par défaut en production; activation uniquement avec `ENABLE_DEMO_USER=true` hors production.
+- Validation plus stricte des emails, mots de passe et champs de profil.
+- Comparaison constante des hashes de mots de passe.
+- Port configurable par `PORT`.
+- Migration SQL initiale avec profils, données d’étude, planning, decks, SRS, Pomodoro, pièces jointes et intégrations.
+- RLS activé sur toutes les tables utilisateur et politiques de propriété basées sur `auth.uid()`.
+
+### Vérifications
+
+```text
+npm run lint       ✅
+npm run build      ✅
+HTTP sans session  ✅ 401 sur données et IA
+Inscription        ✅ cookie chronostudy_session HttpOnly
+Accès authentifié  ✅ accès limité à l’utilisateur courant
+```
+
+## Prérequis pour l’étape Supabase distante
+
+Le connecteur Supabase ne retourne actuellement aucun projet accessible. La migration est donc versionnée localement mais n’a pas été appliquée à distance.
+
+Lorsque le projet Supabase sera connecté :
+
+1. Vérifier le projet et son environnement (développement ou production).
+2. Appliquer `supabase/migrations/202609230001_foundation.sql`.
+3. Vérifier les tables, index et politiques RLS avec les outils Supabase.
+4. Générer les types TypeScript Supabase.
+5. Remplacer progressivement les `Map` mémoire par des repositories Supabase.
+6. Migrer l’authentification Express vers Supabase Auth et supprimer le stockage local des mots de passe.
+
+## Limites connues de cette étape
+
+Le serveur Express utilise encore des stores mémoire pour les comptes et les données. Cette compatibilité transitoire permet de sécuriser l’API sans bloquer le développement, mais elle ne doit pas être utilisée comme persistance de production.
+
+Les boutons de connexion sociale du frontend restent des simulations locales et devront être raccordés à Supabase Auth OAuth lors du lot Auth.
+
+La clé OpenAI BYOK n’est pas encore traitée. Elle devra être stockée dans Supabase Vault ou dans un mécanisme secret équivalent; seule une référence de secret est prévue dans `user_integrations`.
+
+## Étapes suivantes proposées
+
+1. Connecter un projet Supabase de développement.
+2. Appliquer et vérifier la migration fondation.
+3. Ajouter un adaptateur `server/supabase.ts` et des repositories typés.
+4. Migrer le profil et `user_study_data`.
+5. Ajouter les Edge Functions `ai-chat-attachment`, `generate-deck`, `timetable-scan` et `pronote-sync`.
+6. Ajouter les tests d’intégration RLS et les tests de synchronisation.

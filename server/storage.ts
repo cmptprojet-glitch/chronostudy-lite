@@ -75,7 +75,8 @@ export const StorageController = {
   // GET user's synced study data
   getUserData(req: Request, res: Response) {
     const user = getAuthenticatedUser(req);
-    const targetId = user ? user.id : (req.query.sessionId as string) || "guest-session";
+    if (!user) return res.status(401).json({ error: "Authentification requise." });
+    const targetId = user.id;
     const data = userStudyDataStore.get(targetId) || null;
 
     return res.json({
@@ -89,7 +90,8 @@ export const StorageController = {
   // SAVE user's synced study data
   saveUserData(req: Request, res: Response) {
     const user = getAuthenticatedUser(req);
-    const targetId = user ? user.id : (req.body?.sessionId as string) || "guest-session";
+    if (!user) return res.status(401).json({ error: "Authentification requise." });
+    const targetId = user.id;
     const payload = req.body?.data || req.body;
 
     if (!payload || typeof payload !== "object") {
@@ -114,7 +116,8 @@ export const StorageController = {
   // GDPR ART. 20 - EXPORT USER DATA ARCHIVE
   exportUserData(req: Request, res: Response) {
     const user = getAuthenticatedUser(req);
-    const targetId = user ? user.id : (req.query.sessionId as string) || "guest-session";
+    if (!user) return res.status(401).json({ error: "Authentification requise." });
+    const targetId = user.id;
     const data = userStudyDataStore.get(targetId) || {};
 
     const archive = {
@@ -126,14 +129,14 @@ export const StorageController = {
         userEmail: user?.email || "guest@local",
         complianceNotice: "Export réalisé conformément à l'Article 20 du RGPD (Portabilité des données).",
       },
-      userProfile: user ? {
+      userProfile: {
         id: user.id,
         name: user.name,
         email: user.email,
         role: user.role,
         university: user.university,
         createdAt: user.createdAt,
-      } : { role: "Invité / Local" },
+      },
       studyData: data,
     };
 
@@ -145,7 +148,8 @@ export const StorageController = {
   // GDPR ART. 17 - PURGE / RIGHT TO ERASURE
   purgeUserData(req: Request, res: Response) {
     const user = getAuthenticatedUser(req);
-    const targetId = user ? user.id : (req.body?.sessionId as string) || "guest-session";
+    if (!user) return res.status(401).json({ error: "Authentification requise." });
+    const targetId = user.id;
 
     userStudyDataStore.delete(targetId);
 
@@ -168,6 +172,7 @@ export const StorageController = {
     }
 
     const user = getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: "Authentification requise." });
     const code = `${(subject || "CS").slice(0, 3).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const newGroup: ServerStudyGroup = {
       id: `grp-${Date.now()}`,
@@ -178,10 +183,10 @@ export const StorageController = {
       memberCount: 1,
       members: [
         {
-          id: user?.id || "usr-me",
-          name: user?.name || "Moi",
+          id: user.id,
+          name: user.name,
           role: "leader",
-          avatarInitials: user?.avatarInitials || "ME",
+          avatarInitials: user.avatarInitials,
         },
       ],
       messages: [
@@ -223,22 +228,23 @@ export const StorageController = {
     }
 
     const user = getAuthenticatedUser(req);
-    const memberId = user?.id || `guest-${Date.now()}`;
+    if (!user) return res.status(401).json({ error: "Authentification requise." });
+    const memberId = user.id;
     const alreadyMember = foundGroup.members.some((m) => m.id === memberId);
 
     if (!alreadyMember) {
       foundGroup.members.push({
         id: memberId,
-        name: user?.name || "Nouvel Étudiant",
+        name: user.name,
         role: "member",
-        avatarInitials: user?.avatarInitials || "ET",
+        avatarInitials: user.avatarInitials,
       });
       foundGroup.memberCount = foundGroup.members.length;
       foundGroup.messages.push({
         id: `msg-${Date.now()}`,
         sender: "Système",
         avatar: "CS",
-        text: `${user?.name || "Un nouvel étudiant"} a rejoint le groupe d'études !`,
+        text: `${user.name} a rejoint le groupe d'études !`,
         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       });
     }
@@ -261,10 +267,11 @@ export const StorageController = {
     }
 
     const user = getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: "Authentification requise." });
     const newMsg = {
       id: `msg-${Date.now()}`,
-      sender: user?.name || sender || "Étudiant",
-      avatar: user?.avatarInitials || avatar || "ET",
+      sender: user.name,
+      avatar: user.avatarInitials,
       text: text.trim().slice(0, 1000),
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
@@ -287,11 +294,12 @@ export const StorageController = {
     }
 
     const user = getAuthenticatedUser(req);
+    if (!user) return res.status(401).json({ error: "Authentification requise." });
     const shared = {
       id: `sd-${Date.now()}`,
       title: (deckTitle && typeof deckTitle === "string") ? deckTitle.trim().slice(0, 100) : "Deck partagé",
       cardCount: Number(cardCount) || 10,
-      author: user?.name || author || "Étudiant",
+      author: user.name,
     };
 
     group.sharedDecks.push(shared);
