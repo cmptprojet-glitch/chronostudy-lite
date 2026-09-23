@@ -74,3 +74,15 @@ La migration `supabase/migrations/202609230003_study_sessions.sql` ajoute `study
 Les endpoints ajoutés sont `GET/POST /api/v1/study-sessions`, `POST /api/v1/pomodoro/start` et `PATCH /api/v1/pomodoro/:id/finish`. La clôture d’un Pomodoro terminé crée automatiquement un log dans `study_sessions` lorsque le temps focalisé est d’au moins une minute.
 
 La page `/auth-test` couvre désormais l’inscription, la connexion, `/auth/me`, la déconnexion, le chargement des groupes, la création, l’adhésion par code, la publication d’un message, le démarrage et la clôture d’un Pomodoro et la lecture des sessions personnelles.
+
+## Lot P2 — tests d’intégration
+
+La commande `npm run test:integration` compile le serveur puis exécute `tests/integration/backend.test.mjs` avec le runner natif Node. La suite démarre un serveur isolé, vérifie le health check Supabase, les refus `401` des routes privées et la disponibilité de `/auth-test`.
+
+Le scénario authentifié complet est activé lorsque `TEST_AUTH_EMAIL` et `TEST_AUTH_PASSWORD` sont fournis. Il vérifie alors la connexion, `/auth/me`, les groupes, la création et le message de groupe, la création d’une session d’étude et le cycle Pomodoro complet. Exemple :
+
+```bash
+TEST_AUTH_EMAIL=compte-de-test@domaine.fr \
+TEST_AUTH_PASSWORD='mot-de-passe-de-test' \
+npm run test:integration
+```
