@@ -7,7 +7,8 @@ interface DeckRow { id: string; user_id: string; title: string; subject: string 
 interface CardRow { id: string; deck_id: string; card_key: string; question: string; answer: string; card_type: string; options: unknown[]; explanation: string | null; tags: unknown[]; position: number; }
 interface SrsRow { id: string; deck_id: string; card_key: string; interval_days: number; ease_factor: number; repetitions: number; due_at: string; updated_at: string; }
 interface AnalyticsRow { day: string; focused_minutes: number; sessions_completed: number; cards_reviewed: number; cards_mastered: number; xp_earned: number; streak_days: number; }
-interface SessionAnalyticsRow { duration_minutes: number; started_at: string; }
+interface SessionAnalyticsRow { duration_minutes: number; started_at: string; subject: string | null; session_type: string; }
+interface PomodoroAnalyticsRow { focused_seconds: number; started_at: string; status: string; }
 
 async function context(req: Request, res: Response): Promise<Context | null> {
   const user = res.locals.authenticatedUser as ServerUser | undefined || await getAuthenticatedUser(req);
@@ -139,13 +140,55 @@ export const FlashcardsController = {
     if (!auth) return res.status(401).json({ error: "Authentification requise." });
     const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
     const startDate = new Date(Date.now() - days * 86_400_000).toISOString();
-    const [rows, studySessions] = await Promise.all([
+    const [rows, studySessions, pomodoros] = await Promise.all([
       supabaseRestRequest<AnalyticsRow[]>(`/analytics_daily?select=day,focused_minutes,sessions_completed,cards_reviewed,cards_mastered,xp_earned,streak_days&order=day.desc&limit=${days}`, { method: "GET", accessToken: auth.accessToken }),
-      supabaseRestRequest<SessionAnalyticsRow[]>(`/study_sessions?started_at=gte.${encodeURIComponent(startDate)}&select=duration_minutes,started_at&order=started_at.desc&limit=5000`, { method: "GET", accessToken: auth.accessToken }),
+      supabaseRestRequest<SessionAnalyticsRow[]>(`/study_sessions?started_at=gte.${encodeURIComponent(startDate)}&select=duration_minutes,started_at,subject,session_type&order=started_at.desc&limit=5000`, { method: "GET", accessToken: auth.accessToken }),
+      supabaseRestRequest<PomodoroAnalyticsRow[]>(`/pomodoro_sessions?started_at=gte.${encodeURIComponent(startDate)}&select=focused_seconds,started_at,status&order=started_at.desc&limit=5000`, { method: "GET", accessToken: auth.accessToken }),
     ]);
     const analyticsTotals = rows.reduce((acc, row) => ({ cardsReviewed: acc.cardsReviewed + row.cards_reviewed, cardsMastered: acc.cardsMastered + row.cards_mastered, xpEarned: acc.xpEarned + row.xp_earned }), { cardsReviewed: 0, cardsMastered: 0, xpEarned: 0 });
-    const totals = { focusedMinutes: studySessions.reduce((sum, session) => sum + session.duration_minutes, 0), sessionsCompleted: studySessions.length, ...analyticsTotals };
-    return res.json({ periodDays: days, totals, currentStreak: rows[0]?.streak_days || 0, daily: rows });
+    const subjects = Object.values(studySessions.reduce<Record<string, { subject: string; minutes: number; sessions: number }>>((acc, session) => {
+      const subject = session.subject?.trim() || "Autre";
+      const current = acc[subject] || { subject, minutes: 0, sessions: 0 };
+      current.minutes += Number(session.duration_minutes) || 0;
+      current.sessions += 1;
+      acc[subject] = current;
+      return acc;
+    }, {})).sort((a, b) => b.minutes - a.minutes).slice(0, 8);
+    const completedPomodoros = pomodoros.filter((session) => session.status === "completed");
+    const dailyFromSessions = studySessions.reduce<Record<string, { day: string; focusedMinutes: number; sessions: number }>>((acc, session) => {
+      const day = session.started_at.slice(0, 10);
+      const current = acc[day] || { day, focusedMinutes: 0, sessions: 0 };
+      current.focusedMinutes += Number(session.duration_minutes) || 0;
+      current.sessions += 1;
+      acc[day] = current;
+      return acc;
+    }, {});
+    const daily = Array.from({ length: days }, (_, index) => {
+      const date = new Date(Date.now() - (days - 1 - index) * 86_400_000).toISOString().slice(0, 10);
+      const stored = rows.find((row) => row.day === date);
+      const sessionDay = dailyFromSessions[date];
+      return {
+        day: date,
+        focusedMinutes: stored?.focused_minutes || sessionDay?.focusedMinutes || 0,
+        sessionsCompleted: stored?.sessions_completed || sessionDay?.sessions || 0,
+        cardsReviewed: stored?.cards_reviewed || 0,
+        cardsMastered: stored?.cards_mastered || 0,
+        xpEarned: stored?.xp_earned || 0,
+        streakDays: stored?.streak_days || 0,
+      };
+    });
+    const focusedMinutes = studySessions.reduce((sum, session) => sum + (Number(session.duration_minutes) || 0), 0);
+    const totals = { focusedMinutes, sessionsCompleted: studySessions.length, ...analyticsTotals };
+    const bestDay = daily.reduce((best, day) => day.focusedMinutes > best.focusedMinutes ? day : best, daily[0] || { day: new Date().toISOString().slice(0, 10), focusedMinutes: 0, sessionsCompleted: 0, cardsReviewed: 0, cardsMastered: 0, xpEarned: 0, streakDays: 0 });
+    return res.json({
+      periodDays: days,
+      totals,
+      currentStreak: rows[0]?.streak_days || 0,
+      daily,
+      subjects,
+      pomodoro: { completed: completedPomodoros.length, total: pomodoros.length, focusedMinutes: Math.round(pomodoros.reduce((sum, session) => sum + (Number(session.focused_seconds) || 0), 0) / 60) },
+      insights: { averageSessionMinutes: studySessions.length ? Math.round(focusedMinutes / studySessions.length) : 0, activeDays: daily.filter((day) => day.focusedMinutes > 0).length, bestDay: bestDay.day },
+    });
   },
 
   async getDashboardPreferences(req: Request, res: Response) {

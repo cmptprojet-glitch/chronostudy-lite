@@ -108,3 +108,11 @@ Les cinq migrations ont été appliquées au projet Supabase distant dans l’or
 Les cinq Edge Functions sont actives avec `verify_jwt=true` : `ai-chat`, `generate-deck`, `timetable-scan`, `pronote-sync` et `cloud-sync`. Un appel sans JWT à chacune renvoie `401`, ce qui confirme la protection de la plateforme.
 
 Les paramètres Auth publics indiquent que l’inscription email est activée (`disable_signup=false`, `external.email=true`) et que la confirmation automatique est désactivée (`mailer_autoconfirm=false`). Les fournisseurs OAuth Apple, Google, GitHub, Microsoft/Azure et les autres fournisseurs listés restent désactivés et doivent être configurés séparément avec leurs identifiants OAuth.
+
+## Lot Analytics — tableau de bord de suivi élève
+
+Le tableau `analytics_daily` est maintenant alimenté automatiquement par le trigger `record_study_session_analytics` de la migration `supabase/migrations/202609230006_analytics_tracking.sql`. Toute nouvelle session d’étude incrémente le temps de focus et le nombre de sessions du jour; la migration inclut aussi un backfill des sessions déjà présentes.
+
+L’endpoint `/api/v1/analytics/overview` retourne désormais les totaux de période, une série quotidienne, la répartition par matière, les cycles Pomodoro, la série active, le nombre de jours actifs, la durée moyenne d’une session et la meilleure journée. Les requêtes restent limitées à l’utilisateur authentifié par Supabase et les policies RLS.
+
+`AnalyticsView` consomme cet endpoint avec un repli local lorsque la session est absente ou que Supabase est momentanément indisponible. Le dashboard comprend une sélection 7/30/90 jours, des KPI de focus, sessions, série et score de régularité, une courbe de focus quotidienne, une répartition par matière, un suivi Pomodoro, une carte des jours actifs et une synthèse de performance.

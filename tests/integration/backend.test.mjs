@@ -157,4 +157,8 @@ test("flux authentifié Supabase: auth, groupes, sessions et Pomodoro", { skip: 
   const analytics = await api("/api/v1/analytics/overview", { headers: { cookie: cookies } });
   assert.equal(analytics.response.status, 200, JSON.stringify(analytics.body));
   assert.ok(analytics.body.totals);
+  assert.ok(Array.isArray(analytics.body.daily));
+  assert.ok(Array.isArray(analytics.body.subjects));
+  assert.ok(analytics.body.pomodoro);
+  assert.ok(analytics.body.insights);
 });
