@@ -25,6 +25,7 @@ interface HeaderProps {
   onOpenAIChat?: () => void;
   onOpenWorldClock?: () => void;
   onOpenThemeGallery?: () => void;
+  primaryClock?: { name: string; timezone: string };
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -47,6 +48,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAIChat,
   onOpenWorldClock,
   onOpenThemeGallery,
+  primaryClock,
 }) => {
   const { language, toggleLanguage, t } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
@@ -56,12 +58,12 @@ export const Header: React.FC<HeaderProps> = ({
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      setLiveTime(now.toLocaleTimeString(language === 'fr' ? 'fr-FR' : 'en-US', { hour: '2-digit', minute: '2-digit' }));
+      setLiveTime(now.toLocaleTimeString(language === 'fr' ? 'fr-FR' : 'en-US', { hour: '2-digit', minute: '2-digit', timeZone: primaryClock?.timezone === 'local' ? undefined : primaryClock?.timezone }));
     };
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
-  }, [language]);
+  }, [language, primaryClock?.timezone]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,7 +150,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenWorldClock}
             className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-zinc-900 hover:bg-[#EFFDE2] dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800 rounded-full text-xs font-bold text-[#161922] dark:text-white transition-colors shadow-xs cursor-pointer group"
-            title="Ouvrir le système d'Horloge Mondiale & Fuseaux"
+            title={`Horloge principale : ${primaryClock?.name || 'heure locale'}`}
           >
             <AnimatedIcon type="clock" className="w-3.5 h-3.5 text-[#65A30D]" />
             <span className="font-mono font-black">{liveTime || '12:00'}</span>
