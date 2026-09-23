@@ -92,3 +92,11 @@ npm run test:integration
 La migration `supabase/migrations/202609230004_flashcards_analytics.sql` ajoute la table normalisée `flashcards`, les agrégats journaliers `analytics_daily` et les préférences `dashboard_preferences`, avec RLS propriétaire. La table `flashcard_decks` existante reste le conteneur de deck; les cartes sont désormais stockées dans `flashcards` et la progression dans `srs_progress`.
 
 Les routes ajoutées sont `GET/POST /api/v1/decks`, `PATCH/DELETE /api/v1/decks/:id`, `POST /api/v1/srs/review`, `GET /api/v1/analytics/overview` et `GET/PUT /api/v1/dashboard/preferences`. Une révision applique un calcul SRS de type SM-2 simplifié, met à jour `srs_progress` et incrémente `analytics_daily`.
+
+## Infrastructure Supabase — Storage, Vault, Edge Functions et types
+
+La migration `supabase/migrations/202609230005_storage_vault.sql` prépare deux buckets privés (`course-documents` et `avatars`) avec des policies qui imposent un préfixe de chemin égal à l’UUID de l’utilisateur. Elle ajoute également la fonction `set_openai_vault_secret`, qui dépose une clé fournie par l’utilisateur dans Supabase Vault et ne conserve dans `user_integrations` que la référence UUID du secret. L’extension Vault doit être activée dans le projet Supabase avant l’application de cette migration.
+
+Les Edge Functions sont organisées sous `supabase/functions` : `ai-chat`, `generate-deck`, `timetable-scan`, `pronote-sync` et `cloud-sync`. Toutes vérifient le JWT Supabase; les secrets sont lus avec `Deno.env.get` et ne sont jamais transmis au client. Les intégrations Pronote et cloud retournent `503` tant que leurs URLs et tokens serveur ne sont pas configurés. Le fichier `supabase/config.toml` active la vérification JWT pour chaque fonction.
+
+Le fichier `src/lib/supabase/database.types.ts` fournit les types locaux pour les tables principales. Lorsque le projet est accessible, le type officiel peut être régénéré avec `SUPABASE_PROJECT_ID=<project-id> npm run supabase:types`; ce script utilise le CLI Supabase et remplace le fichier par le schéma réel de la base.
