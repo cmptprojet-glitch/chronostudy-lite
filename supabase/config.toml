@@ -1,0 +1,18 @@
+# ChronoStudy Supabase local/project configuration
+# Set project_id after the project is linked in the Supabase connector.
+project_id = "ablrrfrbczhabiwkrfuy"
+
+[functions.ai-chat]
+verify_jwt = true
+
+[functions.generate-deck]
+verify_jwt = true
+
+[functions.timetable-scan]
+verify_jwt = true
+
+[functions.pronote-sync]
+verify_jwt = true
+
+[functions.cloud-sync]
+verify_jwt = true

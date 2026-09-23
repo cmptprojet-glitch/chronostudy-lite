@@ -74,3 +74,37 @@ La migration `supabase/migrations/202609230003_study_sessions.sql` ajoute `study
 Les endpoints ajoutés sont `GET/POST /api/v1/study-sessions`, `POST /api/v1/pomodoro/start` et `PATCH /api/v1/pomodoro/:id/finish`. La clôture d’un Pomodoro terminé crée automatiquement un log dans `study_sessions` lorsque le temps focalisé est d’au moins une minute.
 
 La page `/auth-test` couvre désormais l’inscription, la connexion, `/auth/me`, la déconnexion, le chargement des groupes, la création, l’adhésion par code, la publication d’un message, le démarrage et la clôture d’un Pomodoro et la lecture des sessions personnelles.
+
+## Lot P2 — tests d’intégration
+
+La commande `npm run test:integration` compile le serveur puis exécute `tests/integration/backend.test.mjs` avec le runner natif Node. La suite démarre un serveur isolé, vérifie le health check Supabase, les refus `401` des routes privées et la disponibilité de `/auth-test`.
+
+Le scénario authentifié complet est activé lorsque `TEST_AUTH_EMAIL` et `TEST_AUTH_PASSWORD` sont fournis. Il vérifie alors la connexion, `/auth/me`, les groupes, la création et le message de groupe, la création d’une session d’étude et le cycle Pomodoro complet. Exemple :
+
+```bash
+TEST_AUTH_EMAIL=compte-de-test@domaine.fr \
+TEST_AUTH_PASSWORD='mot-de-passe-de-test' \
+npm run test:integration
+```
+
+## Lot P2 — flashcards, SRS et analytics
+
+La migration `supabase/migrations/202609230004_flashcards_analytics.sql` ajoute la table normalisée `flashcards`, les agrégats journaliers `analytics_daily` et les préférences `dashboard_preferences`, avec RLS propriétaire. La table `flashcard_decks` existante reste le conteneur de deck; les cartes sont désormais stockées dans `flashcards` et la progression dans `srs_progress`.
+
+Les routes ajoutées sont `GET/POST /api/v1/decks`, `PATCH/DELETE /api/v1/decks/:id`, `POST /api/v1/srs/review`, `GET /api/v1/analytics/overview` et `GET/PUT /api/v1/dashboard/preferences`. Une révision applique un calcul SRS de type SM-2 simplifié, met à jour `srs_progress` et incrémente `analytics_daily`.
+
+## Infrastructure Supabase — Storage, Vault, Edge Functions et types
+
+La migration `supabase/migrations/202609230005_storage_vault.sql` prépare deux buckets privés (`course-documents` et `avatars`) avec des policies qui imposent un préfixe de chemin égal à l’UUID de l’utilisateur. Elle ajoute également la fonction `set_openai_vault_secret`, qui dépose une clé fournie par l’utilisateur dans Supabase Vault et ne conserve dans `user_integrations` que la référence UUID du secret. L’extension Vault doit être activée dans le projet Supabase avant l’application de cette migration.
+
+Les Edge Functions sont organisées sous `supabase/functions` : `ai-chat`, `generate-deck`, `timetable-scan`, `pronote-sync` et `cloud-sync`. Toutes vérifient le JWT Supabase; les secrets sont lus avec `Deno.env.get` et ne sont jamais transmis au client. Les intégrations Pronote et cloud retournent `503` tant que leurs URLs et tokens serveur ne sont pas configurés. Le fichier `supabase/config.toml` active la vérification JWT pour chaque fonction.
+
+Le fichier `src/lib/supabase/database.types.ts` fournit les types locaux pour les tables principales. Lorsque le projet est accessible, le type officiel peut être régénéré avec `SUPABASE_PROJECT_ID=<project-id> npm run supabase:types`; ce script utilise le CLI Supabase et remplace le fichier par le schéma réel de la base.
+
+## Déploiement distant du projet `ablrrfrbczhabiwkrfuy`
+
+Les cinq migrations ont été appliquées au projet Supabase distant dans l’ordre. La vérification distante confirme la présence des 16 tables ChronoStudy avec RLS actif, les policies principales, les buckets privés `course-documents` et `avatars`, ainsi que la fonction Vault `public.set_openai_vault_secret`.
+
+Les cinq Edge Functions sont actives avec `verify_jwt=true` : `ai-chat`, `generate-deck`, `timetable-scan`, `pronote-sync` et `cloud-sync`. Un appel sans JWT à chacune renvoie `401`, ce qui confirme la protection de la plateforme.
+
+Les paramètres Auth publics indiquent que l’inscription email est activée (`disable_signup=false`, `external.email=true`) et que la confirmation automatique est désactivée (`mailer_autoconfirm=false`). Les fournisseurs OAuth Apple, Google, GitHub, Microsoft/Azure et les autres fournisseurs listés restent désactivés et doivent être configurés séparément avec leurs identifiants OAuth.

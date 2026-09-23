@@ -7,6 +7,9 @@
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
+    "test:integration": "npm run build && node --test tests/integration/backend.test.mjs",
+    "supabase:types": "node scripts/generate-supabase-types.mjs",
+    "supabase:validate": "npm run lint && npm run build",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },
