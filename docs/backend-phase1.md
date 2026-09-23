@@ -66,3 +66,11 @@ Les routes groupes de `server/storage.ts` utilisent désormais PostgREST et ne c
 Le serveur conserve deux cookies `HttpOnly` : un cookie d’accès court et un cookie refresh de trente jours. Si `/auth/me` ou `requireAuth` reçoit un access token expiré, le serveur appelle automatiquement `grant_type=refresh_token`, remplace les cookies et poursuit la requête avec le nouvel access token.
 
 Une page de validation frontend est disponible sur `/auth-test`. Elle teste l’inscription, la connexion, l’appel à `/api/v1/auth/me` et la déconnexion avec `credentials: include`. Le token n’est pas lisible par JavaScript.
+
+## Lot P1 — sessions d’étude et Pomodoro
+
+La migration `supabase/migrations/202609230003_study_sessions.sql` ajoute `study_sessions`, avec RLS par utilisateur, pour conserver les sessions manuelles, Pomodoro et flashcards.
+
+Les endpoints ajoutés sont `GET/POST /api/v1/study-sessions`, `POST /api/v1/pomodoro/start` et `PATCH /api/v1/pomodoro/:id/finish`. La clôture d’un Pomodoro terminé crée automatiquement un log dans `study_sessions` lorsque le temps focalisé est d’au moins une minute.
+
+La page `/auth-test` couvre désormais l’inscription, la connexion, `/auth/me`, la déconnexion, le chargement des groupes, la création, l’adhésion par code, la publication d’un message, le démarrage et la clôture d’un Pomodoro et la lecture des sessions personnelles.

@@ -7,6 +7,7 @@ import { AuthController, rateLimiter, requireAuth } from "./server/auth";
 import { StorageController } from "./server/storage";
 import { CalendarController } from "./server/calendar";
 import { isSupabaseConfigured } from "./server/supabase";
+import { StudySessionsController } from "./server/studySessions";
 
 dotenv.config();
 
@@ -103,7 +104,15 @@ app.post("/api/calendar/export-ics", privateRateLimit, CalendarController.export
 app.get("/api/calendar/export-ics", privateRateLimit, CalendarController.exportIcs);
 
 // ==========================================
-// 6. AI PROVIDER ENDPOINTS (P0.3, S6, S7, 11.2)
+// 6. STUDY SESSIONS & POMODORO
+// ==========================================
+app.get("/api/v1/study-sessions", privateRateLimit, asyncHandler(StudySessionsController.listStudySessions));
+app.post("/api/v1/study-sessions", privateRateLimit, asyncHandler(StudySessionsController.createStudySession));
+app.post("/api/v1/pomodoro/start", privateRateLimit, asyncHandler(StudySessionsController.startPomodoro));
+app.patch("/api/v1/pomodoro/:id/finish", privateRateLimit, asyncHandler(StudySessionsController.finishPomodoro));
+
+// ==========================================
+// 7. AI PROVIDER ENDPOINTS (P0.3, S6, S7, 11.2)
 // Both /api/v1/ai/* and /api/gemini/* supported!
 // ==========================================
 
