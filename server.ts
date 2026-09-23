@@ -82,18 +82,18 @@ app.post("/api/v1/user/purge", privateRateLimit, asyncHandler(StorageController.
 // ==========================================
 // 4. STUDY GROUPS (Section 7.2)
 // ==========================================
-app.get("/api/v1/groups", privateRateLimit, StorageController.getGroups);
-app.post("/api/v1/groups", privateRateLimit, StorageController.createGroup);
-app.post("/api/v1/groups/join", privateRateLimit, StorageController.joinGroup);
-app.post("/api/v1/groups/:id/messages", privateRateLimit, StorageController.postGroupMessage);
-app.post("/api/v1/groups/:id/share-deck", privateRateLimit, StorageController.shareDeckToGroup);
+app.get("/api/v1/groups", privateRateLimit, asyncHandler(StorageController.getGroups));
+app.post("/api/v1/groups", privateRateLimit, asyncHandler(StorageController.createGroup));
+app.post("/api/v1/groups/join", privateRateLimit, asyncHandler(StorageController.joinGroup));
+app.post("/api/v1/groups/:id/messages", privateRateLimit, asyncHandler(StorageController.postGroupMessage));
+app.post("/api/v1/groups/:id/share-deck", privateRateLimit, asyncHandler(StorageController.shareDeckToGroup));
 
 // Backward-compatible groups aliases
-app.get("/api/groups", privateRateLimit, StorageController.getGroups);
-app.post("/api/groups", privateRateLimit, StorageController.createGroup);
-app.post("/api/groups/join", privateRateLimit, StorageController.joinGroup);
-app.post("/api/groups/:id/messages", privateRateLimit, StorageController.postGroupMessage);
-app.post("/api/groups/:id/share-deck", privateRateLimit, StorageController.shareDeckToGroup);
+app.get("/api/groups", privateRateLimit, asyncHandler(StorageController.getGroups));
+app.post("/api/groups", privateRateLimit, asyncHandler(StorageController.createGroup));
+app.post("/api/groups/join", privateRateLimit, asyncHandler(StorageController.joinGroup));
+app.post("/api/groups/:id/messages", privateRateLimit, asyncHandler(StorageController.postGroupMessage));
+app.post("/api/groups/:id/share-deck", privateRateLimit, asyncHandler(StorageController.shareDeckToGroup));
 
 // ==========================================
 // 5. CALENDAR EXPORT (iCal / .ics - Section 7.1 & 11.4)

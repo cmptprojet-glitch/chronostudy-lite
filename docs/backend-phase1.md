@@ -56,3 +56,13 @@ La clé OpenAI BYOK n’est pas encore traitée. Elle devra être stockée dans 
 4. Migrer le profil et `user_study_data`.
 5. Ajouter les Edge Functions `ai-chat-attachment`, `generate-deck`, `timetable-scan` et `pronote-sync`.
 6. Ajouter les tests d’intégration RLS et les tests de synchronisation.
+
+## Lot groupes et validation Auth
+
+La migration `supabase/migrations/202609230002_study_groups.sql` ajoute les tables `study_groups`, `study_group_members`, `study_group_messages` et `study_group_shared_decks`, ainsi que leurs index et politiques RLS. Les membres portent une copie contrôlée du nom et des initiales afin que les lectures de groupe n’aient pas besoin d’exposer directement `auth.users`.
+
+Les routes groupes de `server/storage.ts` utilisent désormais PostgREST et ne conservent plus les groupes dans une `Map` mémoire. La création, l’adhésion, les messages et les decks partagés sont écrits sous l’identité Supabase de l’utilisateur connecté.
+
+Le serveur conserve deux cookies `HttpOnly` : un cookie d’accès court et un cookie refresh de trente jours. Si `/auth/me` ou `requireAuth` reçoit un access token expiré, le serveur appelle automatiquement `grant_type=refresh_token`, remplace les cookies et poursuit la requête avec le nouvel access token.
+
+Une page de validation frontend est disponible sur `/auth-test`. Elle teste l’inscription, la connexion, l’appel à `/api/v1/auth/me` et la déconnexion avec `credentials: include`. Le token n’est pas lisible par JavaScript.

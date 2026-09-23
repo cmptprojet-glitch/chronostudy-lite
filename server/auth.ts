@@ -22,6 +22,7 @@ export interface ServerUser {
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const SESSION_COOKIE = "chronostudy_session";
+const REFRESH_COOKIE = "chronostudy_refresh";
 const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 function normalizeEmail(value: unknown): string | null {
@@ -51,6 +52,10 @@ export function readSessionToken(req: Request): string | null {
     if (token) return token;
   }
   return readCookies(req)[SESSION_COOKIE] || null;
+}
+
+function readRefreshToken(req: Request): string | null {
+  return readCookies(req)[REFRESH_COOKIE] || null;
 }
 
 function initials(name: string, email: string): string {
@@ -89,8 +94,19 @@ export function setSessionCookie(res: Response, token: string, expiresIn = SESSI
   );
 }
 
+export function setSessionCookies(res: Response, session: SupabaseAuthSession): void {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader("Set-Cookie", [
+    `${SESSION_COOKIE}=${encodeURIComponent(session.access_token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.max(60, session.expires_in || 3600)}${secure}`,
+    `${REFRESH_COOKIE}=${encodeURIComponent(session.refresh_token || "")}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`,
+  ]);
+}
+
 export function clearSessionCookie(res: Response): void {
-  res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`);
+  res.setHeader("Set-Cookie", [
+    `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`,
+    `${REFRESH_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`,
+  ]);
 }
 
 export function rateLimiter(maxRequests = 60, windowSeconds = 60) {
@@ -113,7 +129,12 @@ export function rateLimiter(maxRequests = 60, windowSeconds = 60) {
   };
 }
 
-export async function getAuthenticatedUser(req: Request): Promise<ServerUser | null> {
+export interface AuthenticatedContext {
+  user: ServerUser;
+  accessToken: string;
+}
+
+export async function getAuthenticatedContext(req: Request, res?: Response): Promise<AuthenticatedContext | null> {
   const token = readSessionToken(req);
   if (!token) return null;
   try {
@@ -121,17 +142,34 @@ export async function getAuthenticatedUser(req: Request): Promise<ServerUser | n
       method: "GET",
       accessToken: token,
     });
-    return mapUser(user);
-  } catch {
-    return null;
+    return { user: mapUser(user), accessToken: token };
+  } catch (error) {
+    if (supabaseErrorStatus(error) !== 401) return null;
+    const refreshToken = readRefreshToken(req);
+    if (!refreshToken) return null;
+    try {
+      const refreshed = await supabaseAuthRequest<SupabaseAuthSession>("/token?grant_type=refresh_token", {
+        method: "POST",
+        body: { refresh_token: refreshToken },
+      });
+      if (res) setSessionCookies(res, refreshed);
+      return { user: mapUser(refreshed.user), accessToken: refreshed.access_token };
+    } catch {
+      if (res) clearSessionCookie(res);
+      return null;
+    }
   }
 }
 
+export async function getAuthenticatedUser(req: Request): Promise<ServerUser | null> {
+  return (await getAuthenticatedContext(req))?.user || null;
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const user = await getAuthenticatedUser(req);
-  if (!user) return res.status(401).json({ error: "Authentification requise." });
-  res.locals.authenticatedUser = user;
-  res.locals.supabaseAccessToken = readSessionToken(req);
+  const context = await getAuthenticatedContext(req, res);
+  if (!context) return res.status(401).json({ error: "Authentification requise." });
+  res.locals.authenticatedUser = context.user;
+  res.locals.supabaseAccessToken = context.accessToken;
   return next();
 }
 
@@ -147,7 +185,7 @@ function publicUser(user: ServerUser) {
 }
 
 function respondWithSession(res: Response, session: SupabaseAuthSession | null, user: SupabaseAuthUser, status = 200) {
-  if (session?.access_token) setSessionCookie(res, session.access_token, session.expires_in);
+  if (session?.access_token && session.refresh_token) setSessionCookies(res, session);
   return res.status(status).json({
     success: true,
     token: session?.access_token || null,
@@ -223,16 +261,8 @@ export const AuthController = {
   },
 
   async me(req: Request, res: Response) {
-    const token = readSessionToken(req);
-    if (!token) return res.status(401).json({ error: "Non authentifié ou session expirée." });
-    try {
-      const user = await supabaseAuthRequest<SupabaseAuthUser>("/user", { method: "GET", accessToken: token });
-      return res.json({ authenticated: true, user: publicUser(mapUser(user)) });
-    } catch (error) {
-      clearSessionCookie(res);
-      return res.status(supabaseErrorStatus(error) === 401 ? 401 : 502).json({
-        error: error instanceof Error ? error.message : "Impossible de vérifier la session Supabase.",
-      });
-    }
+    const context = await getAuthenticatedContext(req, res);
+    if (!context) return res.status(401).json({ error: "Non authentifié ou session expirée." });
+    return res.json({ authenticated: true, user: publicUser(context.user) });
   },
 };

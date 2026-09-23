@@ -9,8 +9,8 @@ export interface SupabaseAuthUser {
 
 export interface SupabaseAuthSession {
   access_token: string;
-  refresh_token?: string;
-  expires_in?: number;
+  refresh_token: string;
+  expires_in: number;
   user: SupabaseAuthUser;
 }
 

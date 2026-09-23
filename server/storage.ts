@@ -14,7 +14,6 @@ async function currentUser(req: Request, res: Response): Promise<{ user: ServerU
   return user && accessToken ? { user, accessToken } : null;
 }
 
-// Shared Study Groups store
 export interface ServerStudyGroup {
   id: string;
   name: string;
@@ -29,297 +28,190 @@ export interface ServerStudyGroup {
   createdAt: string;
 }
 
-const studyGroupsStore = new Map<string, ServerStudyGroup>();
+interface GroupRow {
+  id: string;
+  created_by: string;
+  name: string;
+  subject: string;
+  description: string;
+  code: string;
+  is_private: boolean;
+  created_at: string;
+}
 
-// Initialize some starter study groups so students can collaborate immediately
-(function seedStarterGroups() {
-  const group1: ServerStudyGroup = {
-    id: "grp-1",
-    name: "Master Data & IA 2026",
-    subject: "Informatique & IA",
-    description: "Groupe d'entraide, partage de flashcards Machine Learning et révision de partiels.",
-    code: "IA-2026",
-    memberCount: 5,
-    members: [
-      { id: "m-1", name: "Julien Dupont", role: "leader", avatarInitials: "JD" },
-      { id: "m-2", name: "Sarah Connor", role: "member", avatarInitials: "SC" },
-      { id: "m-3", name: "Thomas Anderson", role: "member", avatarInitials: "TA" },
-    ],
-    messages: [
-      { id: "msg-1", sender: "Julien Dupont", avatar: "JD", text: "Bienvenue à tous ! Partagez vos decks de révision ici.", time: "10:30" },
-      { id: "msg-2", sender: "Sarah Connor", avatar: "SC", text: "Merci ! J'ai ajouté un deck sur les réseaux de neurones.", time: "11:15" },
-    ],
-    sharedDecks: [
-      { id: "sd-1", title: "Réseaux Neuronaux & Backpropagation", cardCount: 12, author: "Sarah Connor" },
-    ],
-    isPrivate: false,
-    createdAt: new Date().toISOString(),
-  };
+interface MemberRow {
+  group_id: string;
+  user_id: string;
+  role: "leader" | "member";
+  display_name: string;
+  avatar_initials: string;
+}
 
-  const group2: ServerStudyGroup = {
-    id: "grp-2",
-    name: "Objectif Concours Médecine",
-    subject: "Sciences Médicales",
-    description: "Répétition espacée collective, anatomie, physiologie et QCM intensifs.",
-    code: "MED-99",
-    memberCount: 8,
-    members: [
-      { id: "m-4", name: "Dr. House", role: "leader", avatarInitials: "DH" },
-      { id: "m-5", name: "Claire Redfield", role: "member", avatarInitials: "CR" },
-    ],
-    messages: [
-      { id: "msg-3", sender: "Claire Redfield", avatar: "CR", text: "Prêts pour la session Pomodoro de 18h ?", time: "14:00" },
-    ],
-    sharedDecks: [
-      { id: "sd-2", title: "Système Cardiovasculaire & Électrocardiogramme", cardCount: 24, author: "Dr. House" },
-    ],
-    isPrivate: false,
-    createdAt: new Date().toISOString(),
-  };
+interface MessageRow {
+  id: string;
+  group_id: string;
+  author_id: string;
+  text: string;
+  created_at: string;
+  display_name?: string;
+  avatar_initials?: string;
+}
 
-  studyGroupsStore.set(group1.id, group1);
-  studyGroupsStore.set(group2.id, group2);
-})();
+interface SharedDeckRow {
+  id: string;
+  group_id: string;
+  author_id: string;
+  title: string;
+  card_count: number;
+  created_at: string;
+  display_name?: string;
+}
+
+function inFilter(ids: string[]): string {
+  return `in.(${ids.join(",")})`;
+}
+
+function formatTime(timestamp: string): string {
+  return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+async function loadGroups(accessToken: string, groupFilter?: string): Promise<ServerStudyGroup[]> {
+  const groupQuery = groupFilter
+    ? `/study_groups?id=eq.${encodeURIComponent(groupFilter)}&select=id,created_by,name,subject,description,code,is_private,created_at&limit=1`
+    : "/study_groups?select=id,created_by,name,subject,description,code,is_private,created_at&order=created_at.desc&limit=100";
+  const groups = await supabaseRestRequest<GroupRow[]>(groupQuery, { method: "GET", accessToken });
+  if (!groups.length) return [];
+  const ids = groups.map((group) => group.id);
+  const filter = inFilter(ids);
+  const [members, messages, sharedDecks] = await Promise.all([
+    supabaseRestRequest<MemberRow[]>(`/study_group_members?group_id=${filter}&select=group_id,user_id,role,display_name,avatar_initials&order=joined_at.asc&limit=1000`, { method: "GET", accessToken }),
+    supabaseRestRequest<MessageRow[]>(`/study_group_messages?group_id=${filter}&select=id,group_id,author_id,text,created_at&order=created_at.asc&limit=2000`, { method: "GET", accessToken }),
+    supabaseRestRequest<SharedDeckRow[]>(`/study_group_shared_decks?group_id=${filter}&select=id,group_id,author_id,title,card_count,created_at&order=created_at.desc&limit=1000`, { method: "GET", accessToken }),
+  ]);
+  const memberByUser = new Map(members.map((member) => [member.user_id, member]));
+  return groups.map((group) => ({
+    id: group.id,
+    name: group.name,
+    subject: group.subject,
+    description: group.description,
+    code: group.code,
+    memberCount: members.filter((member) => member.group_id === group.id).length,
+    members: members.filter((member) => member.group_id === group.id).map((member) => ({
+      id: member.user_id,
+      name: member.display_name,
+      role: member.role,
+      avatarInitials: member.avatar_initials,
+    })),
+    messages: messages.filter((message) => message.group_id === group.id).map((message) => {
+      const author = memberByUser.get(message.author_id);
+      return { id: message.id, sender: author?.display_name || "Étudiant", avatar: author?.avatar_initials || "ET", text: message.text, time: formatTime(message.created_at) };
+    }),
+    sharedDecks: sharedDecks.filter((deck) => deck.group_id === group.id).map((deck) => ({
+      id: deck.id,
+      title: deck.title,
+      cardCount: deck.card_count,
+      author: memberByUser.get(deck.author_id)?.display_name || "Étudiant",
+    })),
+    isPrivate: group.is_private,
+    createdAt: group.created_at,
+  }));
+}
 
 export const StorageController = {
-  // GET user's synced study data
   async getUserData(req: Request, res: Response) {
     const context = await currentUser(req, res);
     if (!context) return res.status(401).json({ error: "Authentification requise." });
-    const rows = await supabaseRestRequest<StudyDataRow[]>(`/user_study_data?user_id=eq.${encodeURIComponent(context.user.id)}&select=user_id,payload,last_synced_at&limit=1`, {
-      method: "GET",
-      accessToken: context.accessToken,
-    });
+    const rows = await supabaseRestRequest<StudyDataRow[]>(`/user_study_data?user_id=eq.${encodeURIComponent(context.user.id)}&select=user_id,payload,last_synced_at&limit=1`, { method: "GET", accessToken: context.accessToken });
     const row = rows[0] || null;
-
-    return res.json({
-      userId: context.user.id,
-      authenticated: true,
-      data: row?.payload || null,
-      lastSyncedAt: row?.last_synced_at || null,
-    });
+    return res.json({ userId: context.user.id, authenticated: true, data: row?.payload || null, lastSyncedAt: row?.last_synced_at || null });
   },
 
-  // SAVE user's synced study data
   async saveUserData(req: Request, res: Response) {
     const context = await currentUser(req, res);
     if (!context) return res.status(401).json({ error: "Authentification requise." });
     const payload = req.body?.data || req.body;
-
-    if (!payload || typeof payload !== "object") {
-      return res.status(400).json({ error: "Format de données invalide." });
-    }
-
+    if (!payload || typeof payload !== "object") return res.status(400).json({ error: "Format de données invalide." });
     const lastSyncedAt = new Date().toISOString();
-    await supabaseRestRequest("/user_study_data", {
-      method: "POST",
-      accessToken: context.accessToken,
-      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-      body: { user_id: context.user.id, payload, last_synced_at: lastSyncedAt },
-    });
-
-    return res.json({
-      success: true,
-      lastSyncedAt,
-      message: "Données synchronisées avec succès.",
-    });
+    await supabaseRestRequest("/user_study_data", { method: "POST", accessToken: context.accessToken, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: { user_id: context.user.id, payload, last_synced_at: lastSyncedAt } });
+    return res.json({ success: true, lastSyncedAt, message: "Données synchronisées avec succès." });
   },
 
-  // GDPR ART. 20 - EXPORT USER DATA ARCHIVE
   async exportUserData(req: Request, res: Response) {
     const context = await currentUser(req, res);
     if (!context) return res.status(401).json({ error: "Authentification requise." });
-    const rows = await supabaseRestRequest<StudyDataRow[]>(`/user_study_data?user_id=eq.${encodeURIComponent(context.user.id)}&select=payload&limit=1`, {
-      method: "GET",
-      accessToken: context.accessToken,
-    });
-    const data = rows[0]?.payload || {};
+    const rows = await supabaseRestRequest<StudyDataRow[]>(`/user_study_data?user_id=eq.${encodeURIComponent(context.user.id)}&select=payload&limit=1`, { method: "GET", accessToken: context.accessToken });
     const user = context.user;
-
-    const archive = {
-      exportMetadata: {
-        application: "ChronoStudy",
-        version: "1.0.0",
-        exportedAt: new Date().toISOString(),
-        userId: user.id,
-        userEmail: user.email,
-        complianceNotice: "Export réalisé conformément à l'Article 20 du RGPD (Portabilité des données).",
-      },
-      userProfile: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        university: user.university,
-        createdAt: user.createdAt,
-      },
-      studyData: data,
-    };
-
+    const archive = { exportMetadata: { application: "ChronoStudy", version: "1.0.0", exportedAt: new Date().toISOString(), userId: user.id, userEmail: user.email, complianceNotice: "Export réalisé conformément à l'Article 20 du RGPD (Portabilité des données)." }, userProfile: { id: user.id, name: user.name, email: user.email, role: user.role, university: user.university, createdAt: user.createdAt }, studyData: rows[0]?.payload || {} };
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Content-Disposition", `attachment; filename="chronostudy-export-${Date.now()}.json"`);
     return res.send(JSON.stringify(archive, null, 2));
   },
 
-  // GDPR ART. 17 - PURGE / RIGHT TO ERASURE
   async purgeUserData(req: Request, res: Response) {
     const context = await currentUser(req, res);
     if (!context) return res.status(401).json({ error: "Authentification requise." });
-    await supabaseRestRequest(`/user_study_data?user_id=eq.${encodeURIComponent(context.user.id)}`, {
-      method: "DELETE",
-      accessToken: context.accessToken,
-    });
-
-    return res.json({
-      success: true,
-      message: "Toutes les données associées à cette session/utilisateur ont été définitivement purgées du serveur conformément au RGPD.",
-    });
+    await supabaseRestRequest(`/user_study_data?user_id=eq.${encodeURIComponent(context.user.id)}`, { method: "DELETE", accessToken: context.accessToken });
+    return res.json({ success: true, message: "Toutes les données associées à cet utilisateur ont été définitivement purgées du serveur conformément au RGPD." });
   },
 
-  // GROUPS: List all groups
-  getGroups(req: Request, res: Response) {
-    return res.json(Array.from(studyGroupsStore.values()));
+  async getGroups(req: Request, res: Response) {
+    const context = await currentUser(req, res);
+    if (!context) return res.status(401).json({ error: "Authentification requise." });
+    return res.json(await loadGroups(context.accessToken));
   },
 
-  // GROUPS: Create a new group
-  createGroup(req: Request, res: Response) {
+  async createGroup(req: Request, res: Response) {
     const { name, subject, description, isPrivate } = req.body || {};
-    if (!name || typeof name !== "string" || name.trim().length < 3) {
-      return res.status(400).json({ error: "Le nom du groupe doit comporter au moins 3 caractères." });
-    }
-
-    const user = res.locals.authenticatedUser as ServerUser | undefined;
-    if (!user) return res.status(401).json({ error: "Authentification requise." });
-    const code = `${(subject || "CS").slice(0, 3).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const newGroup: ServerStudyGroup = {
-      id: `grp-${Date.now()}`,
-      name: name.trim().slice(0, 80),
-      subject: (subject && typeof subject === "string") ? subject.trim().slice(0, 60) : "Général",
-      description: (description && typeof description === "string") ? description.trim().slice(0, 300) : "Groupe d'études",
-      code,
-      memberCount: 1,
-      members: [
-        {
-          id: user.id,
-          name: user.name,
-          role: "leader",
-          avatarInitials: user.avatarInitials,
-        },
-      ],
-      messages: [
-        {
-          id: `msg-${Date.now()}`,
-          sender: "Système",
-          avatar: "CS",
-          text: `Groupe "${name}" créé avec succès. Code d'invitation : ${code}`,
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        },
-      ],
-      sharedDecks: [],
-      isPrivate: !!isPrivate,
-      createdAt: new Date().toISOString(),
-    };
-
-    studyGroupsStore.set(newGroup.id, newGroup);
-    return res.status(201).json(newGroup);
+    if (!name || typeof name !== "string" || name.trim().length < 3) return res.status(400).json({ error: "Le nom du groupe doit comporter au moins 3 caractères." });
+    const context = await currentUser(req, res);
+    if (!context) return res.status(401).json({ error: "Authentification requise." });
+    const cleanSubject = typeof subject === "string" ? subject.trim().slice(0, 60) || "Général" : "Général";
+    const cleanName = name.trim().slice(0, 80);
+    const code = `${cleanSubject.slice(0, 3).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const rows = await supabaseRestRequest<GroupRow[]>("/study_groups", { method: "POST", accessToken: context.accessToken, headers: { Prefer: "return=representation" }, body: { created_by: context.user.id, name: cleanName, subject: cleanSubject, description: typeof description === "string" ? description.trim().slice(0, 300) || "Groupe d'études" : "Groupe d'études", code, is_private: Boolean(isPrivate) } });
+    const group = rows[0];
+    if (!group) return res.status(502).json({ error: "Le groupe n'a pas pu être créé." });
+    await supabaseRestRequest("/study_group_members", { method: "POST", accessToken: context.accessToken, headers: { Prefer: "return=minimal" }, body: { group_id: group.id, user_id: context.user.id, role: "leader", display_name: context.user.name, avatar_initials: context.user.avatarInitials } });
+    await supabaseRestRequest("/study_group_messages", { method: "POST", accessToken: context.accessToken, headers: { Prefer: "return=minimal" }, body: { group_id: group.id, author_id: context.user.id, text: `Groupe "${cleanName}" créé avec succès. Code d'invitation : ${code}` } });
+    const created = await loadGroups(context.accessToken, group.id);
+    return res.status(201).json(created[0]);
   },
 
-  // GROUPS: Join group by code
-  joinGroup(req: Request, res: Response) {
-    const { code } = req.body || {};
-    if (!code || typeof code !== "string") {
-      return res.status(400).json({ error: "Code d'invitation manquant." });
+  async joinGroup(req: Request, res: Response) {
+    const code = typeof req.body?.code === "string" ? req.body.code.trim().toUpperCase() : "";
+    if (!code) return res.status(400).json({ error: "Code d'invitation manquant." });
+    const context = await currentUser(req, res);
+    if (!context) return res.status(401).json({ error: "Authentification requise." });
+    const groups = await supabaseRestRequest<GroupRow[]>(`/study_groups?code=eq.${encodeURIComponent(code)}&select=id&limit=1`, { method: "GET", accessToken: context.accessToken });
+    const group = groups[0];
+    if (!group) return res.status(404).json({ error: "Aucun groupe d'étude trouvé avec ce code d'invitation." });
+    const existing = await supabaseRestRequest<MemberRow[]>(`/study_group_members?group_id=eq.${group.id}&user_id=eq.${context.user.id}&select=group_id&limit=1`, { method: "GET", accessToken: context.accessToken });
+    if (!existing.length) {
+      await supabaseRestRequest("/study_group_members", { method: "POST", accessToken: context.accessToken, headers: { Prefer: "return=minimal" }, body: { group_id: group.id, user_id: context.user.id, role: "member", display_name: context.user.name, avatar_initials: context.user.avatarInitials } });
+      await supabaseRestRequest("/study_group_messages", { method: "POST", accessToken: context.accessToken, headers: { Prefer: "return=minimal" }, body: { group_id: group.id, author_id: context.user.id, text: `${context.user.name} a rejoint le groupe d'études !` } });
     }
-
-    const cleanCode = code.trim().toUpperCase();
-    let foundGroup: ServerStudyGroup | null = null;
-    for (const g of studyGroupsStore.values()) {
-      if (g.code.toUpperCase() === cleanCode) {
-        foundGroup = g;
-        break;
-      }
-    }
-
-    if (!foundGroup) {
-      return res.status(404).json({ error: "Aucun groupe d'étude trouvé avec ce code d'invitation." });
-    }
-
-    const user = res.locals.authenticatedUser as ServerUser | undefined;
-    if (!user) return res.status(401).json({ error: "Authentification requise." });
-    const memberId = user.id;
-    const alreadyMember = foundGroup.members.some((m) => m.id === memberId);
-
-    if (!alreadyMember) {
-      foundGroup.members.push({
-        id: memberId,
-        name: user.name,
-        role: "member",
-        avatarInitials: user.avatarInitials,
-      });
-      foundGroup.memberCount = foundGroup.members.length;
-      foundGroup.messages.push({
-        id: `msg-${Date.now()}`,
-        sender: "Système",
-        avatar: "CS",
-        text: `${user.name} a rejoint le groupe d'études !`,
-        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      });
-    }
-
-    return res.json({ success: true, group: foundGroup });
+    const joined = await loadGroups(context.accessToken, group.id);
+    return res.json({ success: true, group: joined[0] });
   },
 
-  // GROUPS: Post message
-  postGroupMessage(req: Request, res: Response) {
-    const { id } = req.params;
-    const { text, sender, avatar } = req.body || {};
-
-    const group = studyGroupsStore.get(id);
-    if (!group) {
-      return res.status(404).json({ error: "Groupe introuvable." });
-    }
-
-    if (!text || typeof text !== "string" || text.trim().length === 0) {
-      return res.status(400).json({ error: "Message vide." });
-    }
-
-    const user = res.locals.authenticatedUser as ServerUser | undefined;
-    if (!user) return res.status(401).json({ error: "Authentification requise." });
-    const newMsg = {
-      id: `msg-${Date.now()}`,
-      sender: user.name,
-      avatar: user.avatarInitials,
-      text: text.trim().slice(0, 1000),
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    };
-
-    group.messages.push(newMsg);
-    // Keep max 100 messages
-    if (group.messages.length > 100) group.messages.shift();
-
-    return res.json({ success: true, message: newMsg });
+  async postGroupMessage(req: Request, res: Response) {
+    const text = typeof req.body?.text === "string" ? req.body.text.trim().slice(0, 1000) : "";
+    if (!text) return res.status(400).json({ error: "Message vide." });
+    const context = await currentUser(req, res);
+    if (!context) return res.status(401).json({ error: "Authentification requise." });
+    const rows = await supabaseRestRequest<MessageRow[]>("/study_group_messages", { method: "POST", accessToken: context.accessToken, headers: { Prefer: "return=representation" }, body: { group_id: req.params.id, author_id: context.user.id, text } });
+    const message = rows[0];
+    if (!message) return res.status(502).json({ error: "Le message n'a pas pu être publié." });
+    return res.json({ success: true, message: { id: message.id, sender: context.user.name, avatar: context.user.avatarInitials, text: message.text, time: formatTime(message.created_at) } });
   },
 
-  // GROUPS: Share flashcard deck
-  shareDeckToGroup(req: Request, res: Response) {
-    const { id } = req.params;
-    const { deckTitle, cardCount, author } = req.body || {};
-
-    const group = studyGroupsStore.get(id);
-    if (!group) {
-      return res.status(404).json({ error: "Groupe introuvable." });
-    }
-
-    const user = res.locals.authenticatedUser as ServerUser | undefined;
-    if (!user) return res.status(401).json({ error: "Authentification requise." });
-    const shared = {
-      id: `sd-${Date.now()}`,
-      title: (deckTitle && typeof deckTitle === "string") ? deckTitle.trim().slice(0, 100) : "Deck partagé",
-      cardCount: Number(cardCount) || 10,
-      author: user.name,
-    };
-
-    group.sharedDecks.push(shared);
-    return res.json({ success: true, sharedDeck: shared });
+  async shareDeckToGroup(req: Request, res: Response) {
+    const context = await currentUser(req, res);
+    if (!context) return res.status(401).json({ error: "Authentification requise." });
+    const title = typeof req.body?.deckTitle === "string" ? req.body.deckTitle.trim().slice(0, 100) || "Deck partagé" : "Deck partagé";
+    const rows = await supabaseRestRequest<SharedDeckRow[]>("/study_group_shared_decks", { method: "POST", accessToken: context.accessToken, headers: { Prefer: "return=representation" }, body: { group_id: req.params.id, author_id: context.user.id, title, card_count: Math.max(0, Number(req.body?.cardCount) || 0) } });
+    const shared = rows[0];
+    if (!shared) return res.status(502).json({ error: "Le deck n'a pas pu être partagé." });
+    return res.json({ success: true, sharedDeck: { id: shared.id, title: shared.title, cardCount: shared.card_count, author: context.user.name } });
   },
 };
