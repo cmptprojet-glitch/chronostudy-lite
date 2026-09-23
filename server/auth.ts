@@ -1,12 +1,18 @@
-import crypto from "crypto";
 import { Request, Response, NextFunction } from "express";
+import { supabaseAuthRequest, SupabaseAuthSession, SupabaseAuthUser } from "./supabase";
+
+interface SupabaseSignUpResponse {
+  user: SupabaseAuthUser;
+  session: SupabaseAuthSession | null;
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+}
 
 export interface ServerUser {
   id: string;
   name: string;
   email: string;
-  passwordHash: string;
-  passwordSalt: string;
   role: string;
   university: string;
   avatarInitials: string;
@@ -14,29 +20,9 @@ export interface ServerUser {
   createdAt: string;
 }
 
-export interface SessionData {
-  userId: string;
-  token: string;
-  createdAt: string;
-  expiresAt: string;
-}
-
-// Transitional store only. Supabase Auth/Postgres replaces these maps in the next backend lot.
-const usersMap = new Map<string, ServerUser>();
-const sessionsMap = new Map<string, SessionData>();
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const SESSION_COOKIE = "chronostudy_session";
 const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
-
-function hashPassword(password: string, salt: string): string {
-  return crypto.pbkdf2Sync(password, salt, 100_000, 64, "sha512").toString("hex");
-}
-
-function safeEqualHex(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left, "hex");
-  const rightBuffer = Buffer.from(right, "hex");
-  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
-}
 
 function normalizeEmail(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -58,7 +44,7 @@ function readCookies(req: Request): Record<string, string> {
   );
 }
 
-function readSessionToken(req: Request): string | null {
+export function readSessionToken(req: Request): string | null {
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.slice("Bearer ".length).trim();
@@ -67,34 +53,39 @@ function readSessionToken(req: Request): string | null {
   return readCookies(req)[SESSION_COOKIE] || null;
 }
 
-function createSession(userId: string): SessionData {
-  const now = new Date();
-  const session: SessionData = {
-    userId,
-    token: crypto.randomBytes(32).toString("hex"),
-    createdAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + SESSION_TTL_SECONDS * 1000).toISOString(),
-  };
-  sessionsMap.set(session.token, session);
-  return session;
+function initials(name: string, email: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length > 1) return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  return (parts[0] || email).slice(0, 2).toUpperCase();
 }
 
-function publicUser(user: ServerUser) {
+function mapUser(user: SupabaseAuthUser): ServerUser {
+  const metadata = user.user_metadata || {};
+  const name = typeof metadata.name === "string" && metadata.name.trim()
+    ? metadata.name.trim()
+    : (user.email || "Étudiant").split("@")[0];
   return {
     id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    university: user.university,
-    avatarInitials: user.avatarInitials,
+    name,
+    email: user.email || "",
+    role: typeof metadata.role === "string" ? metadata.role : "Étudiant",
+    university: typeof metadata.university === "string" ? metadata.university : "Université",
+    avatarInitials: initials(name, user.email || "ET"),
+    avatarUrl: typeof metadata.avatar_url === "string" ? metadata.avatar_url : undefined,
+    createdAt: user.created_at || new Date().toISOString(),
   };
 }
 
-export function setSessionCookie(res: Response, token: string): void {
+function supabaseErrorStatus(error: unknown): number {
+  const status = (error as { status?: number })?.status;
+  return typeof status === "number" ? status : 502;
+}
+
+export function setSessionCookie(res: Response, token: string, expiresIn = SESSION_TTL_SECONDS): void {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   res.setHeader(
     "Set-Cookie",
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`,
+    `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.max(60, expiresIn)}${secure}`,
   );
 }
 
@@ -122,36 +113,51 @@ export function rateLimiter(maxRequests = 60, windowSeconds = 60) {
   };
 }
 
-export function getAuthenticatedUser(req: Request): ServerUser | null {
+export async function getAuthenticatedUser(req: Request): Promise<ServerUser | null> {
   const token = readSessionToken(req);
   if (!token) return null;
-  const session = sessionsMap.get(token);
-  if (!session) return null;
-  if (Date.parse(session.expiresAt) <= Date.now()) {
-    sessionsMap.delete(token);
+  try {
+    const user = await supabaseAuthRequest<SupabaseAuthUser>("/user", {
+      method: "GET",
+      accessToken: token,
+    });
+    return mapUser(user);
+  } catch {
     return null;
   }
-  for (const user of usersMap.values()) {
-    if (user.id === session.userId) return user;
-  }
-  return null;
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (!getAuthenticatedUser(req)) {
-    return res.status(401).json({ error: "Authentification requise." });
-  }
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const user = await getAuthenticatedUser(req);
+  if (!user) return res.status(401).json({ error: "Authentification requise." });
+  res.locals.authenticatedUser = user;
+  res.locals.supabaseAccessToken = readSessionToken(req);
   return next();
 }
 
-function issueSession(res: Response, user: ServerUser) {
-  const session = createSession(user.id);
-  setSessionCookie(res, session.token);
-  return { success: true, token: session.token, user: publicUser(user) };
+function publicUser(user: ServerUser) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    university: user.university,
+    avatarInitials: user.avatarInitials,
+  };
+}
+
+function respondWithSession(res: Response, session: SupabaseAuthSession | null, user: SupabaseAuthUser, status = 200) {
+  if (session?.access_token) setSessionCookie(res, session.access_token, session.expires_in);
+  return res.status(status).json({
+    success: true,
+    token: session?.access_token || null,
+    user: publicUser(mapUser(user)),
+    requiresEmailConfirmation: !session,
+  });
 }
 
 export const AuthController = {
-  register(req: Request, res: Response) {
+  async register(req: Request, res: Response) {
     const { name, email: rawEmail, password, role, university } = req.body || {};
     const email = normalizeEmail(rawEmail);
     if (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 80) {
@@ -161,65 +167,72 @@ export const AuthController = {
     if (typeof password !== "string" || password.length < 8 || password.length > 128) {
       return res.status(400).json({ error: "Le mot de passe doit comporter entre 8 et 128 caractères." });
     }
-    if (usersMap.has(email)) return res.status(409).json({ error: "Un compte existe déjà avec cette adresse email." });
-
-    const nameParts = name.trim().split(/\s+/);
-    const avatarInitials = nameParts.length > 1
-      ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`.toUpperCase()
-      : nameParts[0].slice(0, 2).toUpperCase();
-    const salt = crypto.randomBytes(16).toString("hex");
-    const user: ServerUser = {
-      id: `usr-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,
-      name: name.trim(),
-      email,
-      passwordSalt: salt,
-      passwordHash: hashPassword(password, salt),
-      role: typeof role === "string" ? role.trim().slice(0, 80) || "Étudiant" : "Étudiant",
-      university: typeof university === "string" ? university.trim().slice(0, 100) || "Université" : "Université",
-      avatarInitials,
-      createdAt: new Date().toISOString(),
-    };
-    usersMap.set(email, user);
-    return res.status(201).json(issueSession(res, user));
+    try {
+      const result = await supabaseAuthRequest<SupabaseSignUpResponse>("/signup", {
+        method: "POST",
+        body: {
+          email,
+          password,
+          data: {
+            name: name.trim(),
+            role: typeof role === "string" ? role.trim().slice(0, 80) : "Étudiant",
+            university: typeof university === "string" ? university.trim().slice(0, 100) : "Université",
+          },
+        },
+      });
+      const session = result.session || (result.access_token
+        ? {
+            access_token: result.access_token,
+            refresh_token: result.refresh_token,
+            expires_in: result.expires_in,
+            user: result.user,
+          }
+        : null);
+      return respondWithSession(res, session, result.user, session ? 201 : 202);
+    } catch (error) {
+      return res.status(supabaseErrorStatus(error)).json({ error: error instanceof Error ? error.message : "Inscription Supabase impossible." });
+    }
   },
 
-  login(req: Request, res: Response) {
+  async login(req: Request, res: Response) {
     const email = normalizeEmail(req.body?.email);
     const password = req.body?.password;
     if (!email || typeof password !== "string") return res.status(400).json({ error: "Identifiants invalides." });
-    const user = usersMap.get(email);
-    if (!user || !safeEqualHex(hashPassword(password, user.passwordSalt), user.passwordHash)) {
-      return res.status(401).json({ error: "Email ou mot de passe incorrect." });
+    try {
+      const session = await supabaseAuthRequest<SupabaseAuthSession>("/token?grant_type=password", {
+        method: "POST",
+        body: { email, password },
+      });
+      return respondWithSession(res, session, session.user);
+    } catch (error) {
+      return res.status(supabaseErrorStatus(error)).json({ error: error instanceof Error ? error.message : "Connexion Supabase impossible." });
     }
-    return res.json(issueSession(res, user));
   },
 
-  logout(req: Request, res: Response) {
+  async logout(req: Request, res: Response) {
     const token = readSessionToken(req);
-    if (token) sessionsMap.delete(token);
+    if (token) {
+      try {
+        await supabaseAuthRequest<void>("/logout", { method: "POST", accessToken: token });
+      } catch {
+        // Always clear the local cookie, even if Supabase already expired the session.
+      }
+    }
     clearSessionCookie(res);
     return res.json({ success: true, message: "Déconnexion réussie." });
   },
 
-  me(req: Request, res: Response) {
-    const user = getAuthenticatedUser(req);
-    if (!user) return res.status(401).json({ error: "Non authentifié ou session expirée." });
-    return res.json({ authenticated: true, user: publicUser(user) });
+  async me(req: Request, res: Response) {
+    const token = readSessionToken(req);
+    if (!token) return res.status(401).json({ error: "Non authentifié ou session expirée." });
+    try {
+      const user = await supabaseAuthRequest<SupabaseAuthUser>("/user", { method: "GET", accessToken: token });
+      return res.json({ authenticated: true, user: publicUser(mapUser(user)) });
+    } catch (error) {
+      clearSessionCookie(res);
+      return res.status(supabaseErrorStatus(error) === 401 ? 401 : 502).json({
+        error: error instanceof Error ? error.message : "Impossible de vérifier la session Supabase.",
+      });
+    }
   },
 };
-
-// Demo account is opt-in and never seeded in production by default.
-if (process.env.ENABLE_DEMO_USER === "true" && process.env.NODE_ENV !== "production") {
-  const salt = crypto.randomBytes(16).toString("hex");
-  usersMap.set("julien.dupont@chronostudy.fr", {
-    id: "user-default-1",
-    name: "Julien Dupont",
-    email: "julien.dupont@chronostudy.fr",
-    passwordSalt: salt,
-    passwordHash: hashPassword("ChronoStudy2026!", salt),
-    role: "Master 2 Data Science & IA",
-    university: "Université Paris-Saclay / Sorbonne",
-    avatarInitials: "JD",
-    createdAt: new Date().toISOString(),
-  });
-}

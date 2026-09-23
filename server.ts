@@ -6,6 +6,7 @@ import { AiProviderService } from "./server/aiProvider";
 import { AuthController, rateLimiter, requireAuth } from "./server/auth";
 import { StorageController } from "./server/storage";
 import { CalendarController } from "./server/calendar";
+import { isSupabaseConfigured } from "./server/supabase";
 
 dotenv.config();
 
@@ -35,6 +36,9 @@ const generalRateLimit = rateLimiter(60, 60);
 const aiRateLimit = rateLimiter(20, 60);
 const privateRateLimit = [generalRateLimit, requireAuth];
 const privateAiRateLimit = [aiRateLimit, requireAuth];
+const asyncHandler = (handler: express.RequestHandler): express.RequestHandler => {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+};
 
 // ==========================================
 // 1. HEALTH & METRICS
@@ -46,7 +50,7 @@ app.get("/api/health", (req, res) => {
     version: "1.1.0",
     compliance: {
       gdprReady: true,
-      authProvider: "session_token_pbkdf2",
+      authProvider: isSupabaseConfigured() ? "supabase_auth" : "supabase_not_configured",
       offlineCapable: true,
     },
     timestamp: new Date().toISOString(),
@@ -56,24 +60,24 @@ app.get("/api/health", (req, res) => {
 // ==========================================
 // 2. AUTHENTICATION (P0.1, S1, S2)
 // ==========================================
-app.post("/api/v1/auth/register", generalRateLimit, AuthController.register);
-app.post("/api/v1/auth/login", generalRateLimit, AuthController.login);
-app.post("/api/v1/auth/logout", generalRateLimit, AuthController.logout);
-app.get("/api/v1/auth/me", generalRateLimit, AuthController.me);
+app.post("/api/v1/auth/register", generalRateLimit, asyncHandler(AuthController.register));
+app.post("/api/v1/auth/login", generalRateLimit, asyncHandler(AuthController.login));
+app.post("/api/v1/auth/logout", generalRateLimit, asyncHandler(AuthController.logout));
+app.get("/api/v1/auth/me", generalRateLimit, asyncHandler(AuthController.me));
 
 // Backward-compatible auth aliases
-app.post("/api/auth/register", generalRateLimit, AuthController.register);
-app.post("/api/auth/login", generalRateLimit, AuthController.login);
-app.post("/api/auth/logout", generalRateLimit, AuthController.logout);
-app.get("/api/auth/me", generalRateLimit, AuthController.me);
+app.post("/api/auth/register", generalRateLimit, asyncHandler(AuthController.register));
+app.post("/api/auth/login", generalRateLimit, asyncHandler(AuthController.login));
+app.post("/api/auth/logout", generalRateLimit, asyncHandler(AuthController.logout));
+app.get("/api/auth/me", generalRateLimit, asyncHandler(AuthController.me));
 
 // ==========================================
 // 3. STORAGE & GDPR (P0.2, S3, Section 10)
 // ==========================================
-app.get("/api/v1/user/data", privateRateLimit, StorageController.getUserData);
-app.post("/api/v1/user/data", privateRateLimit, StorageController.saveUserData);
-app.get("/api/v1/user/export", privateRateLimit, StorageController.exportUserData);
-app.post("/api/v1/user/purge", privateRateLimit, StorageController.purgeUserData);
+app.get("/api/v1/user/data", privateRateLimit, asyncHandler(StorageController.getUserData));
+app.post("/api/v1/user/data", privateRateLimit, asyncHandler(StorageController.saveUserData));
+app.get("/api/v1/user/export", privateRateLimit, asyncHandler(StorageController.exportUserData));
+app.post("/api/v1/user/purge", privateRateLimit, asyncHandler(StorageController.purgeUserData));
 
 // ==========================================
 // 4. STUDY GROUPS (Section 7.2)

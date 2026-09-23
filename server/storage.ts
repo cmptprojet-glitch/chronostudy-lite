@@ -1,8 +1,18 @@
 import { Request, Response } from "express";
-import { getAuthenticatedUser } from "./auth";
+import { getAuthenticatedUser, readSessionToken, ServerUser } from "./auth";
+import { supabaseRestRequest } from "./supabase";
 
-// In-memory persistent collections indexed by userId
-const userStudyDataStore = new Map<string, any>();
+interface StudyDataRow {
+  user_id: string;
+  payload: Record<string, unknown>;
+  last_synced_at: string;
+}
+
+async function currentUser(req: Request, res: Response): Promise<{ user: ServerUser; accessToken: string } | null> {
+  const user = res.locals.authenticatedUser as ServerUser | undefined || await getAuthenticatedUser(req);
+  const accessToken = res.locals.supabaseAccessToken as string | undefined || readSessionToken(req);
+  return user && accessToken ? { user, accessToken } : null;
+}
 
 // Shared Study Groups store
 export interface ServerStudyGroup {
@@ -73,60 +83,66 @@ const studyGroupsStore = new Map<string, ServerStudyGroup>();
 
 export const StorageController = {
   // GET user's synced study data
-  getUserData(req: Request, res: Response) {
-    const user = getAuthenticatedUser(req);
-    if (!user) return res.status(401).json({ error: "Authentification requise." });
-    const targetId = user.id;
-    const data = userStudyDataStore.get(targetId) || null;
+  async getUserData(req: Request, res: Response) {
+    const context = await currentUser(req, res);
+    if (!context) return res.status(401).json({ error: "Authentification requise." });
+    const rows = await supabaseRestRequest<StudyDataRow[]>(`/user_study_data?user_id=eq.${encodeURIComponent(context.user.id)}&select=user_id,payload,last_synced_at&limit=1`, {
+      method: "GET",
+      accessToken: context.accessToken,
+    });
+    const row = rows[0] || null;
 
     return res.json({
-      userId: targetId,
-      authenticated: !!user,
-      data,
-      lastSyncedAt: data?.lastSyncedAt || null,
+      userId: context.user.id,
+      authenticated: true,
+      data: row?.payload || null,
+      lastSyncedAt: row?.last_synced_at || null,
     });
   },
 
   // SAVE user's synced study data
-  saveUserData(req: Request, res: Response) {
-    const user = getAuthenticatedUser(req);
-    if (!user) return res.status(401).json({ error: "Authentification requise." });
-    const targetId = user.id;
+  async saveUserData(req: Request, res: Response) {
+    const context = await currentUser(req, res);
+    if (!context) return res.status(401).json({ error: "Authentification requise." });
     const payload = req.body?.data || req.body;
 
     if (!payload || typeof payload !== "object") {
       return res.status(400).json({ error: "Format de données invalide." });
     }
 
-    const recordToSave = {
-      ...payload,
-      lastSyncedAt: new Date().toISOString(),
-      ownerId: targetId,
-    };
-
-    userStudyDataStore.set(targetId, recordToSave);
+    const lastSyncedAt = new Date().toISOString();
+    await supabaseRestRequest("/user_study_data", {
+      method: "POST",
+      accessToken: context.accessToken,
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: { user_id: context.user.id, payload, last_synced_at: lastSyncedAt },
+    });
 
     return res.json({
       success: true,
-      lastSyncedAt: recordToSave.lastSyncedAt,
+      lastSyncedAt,
       message: "Données synchronisées avec succès.",
     });
   },
 
   // GDPR ART. 20 - EXPORT USER DATA ARCHIVE
-  exportUserData(req: Request, res: Response) {
-    const user = getAuthenticatedUser(req);
-    if (!user) return res.status(401).json({ error: "Authentification requise." });
-    const targetId = user.id;
-    const data = userStudyDataStore.get(targetId) || {};
+  async exportUserData(req: Request, res: Response) {
+    const context = await currentUser(req, res);
+    if (!context) return res.status(401).json({ error: "Authentification requise." });
+    const rows = await supabaseRestRequest<StudyDataRow[]>(`/user_study_data?user_id=eq.${encodeURIComponent(context.user.id)}&select=payload&limit=1`, {
+      method: "GET",
+      accessToken: context.accessToken,
+    });
+    const data = rows[0]?.payload || {};
+    const user = context.user;
 
     const archive = {
       exportMetadata: {
         application: "ChronoStudy",
         version: "1.0.0",
         exportedAt: new Date().toISOString(),
-        userId: targetId,
-        userEmail: user?.email || "guest@local",
+        userId: user.id,
+        userEmail: user.email,
         complianceNotice: "Export réalisé conformément à l'Article 20 du RGPD (Portabilité des données).",
       },
       userProfile: {
@@ -146,12 +162,13 @@ export const StorageController = {
   },
 
   // GDPR ART. 17 - PURGE / RIGHT TO ERASURE
-  purgeUserData(req: Request, res: Response) {
-    const user = getAuthenticatedUser(req);
-    if (!user) return res.status(401).json({ error: "Authentification requise." });
-    const targetId = user.id;
-
-    userStudyDataStore.delete(targetId);
+  async purgeUserData(req: Request, res: Response) {
+    const context = await currentUser(req, res);
+    if (!context) return res.status(401).json({ error: "Authentification requise." });
+    await supabaseRestRequest(`/user_study_data?user_id=eq.${encodeURIComponent(context.user.id)}`, {
+      method: "DELETE",
+      accessToken: context.accessToken,
+    });
 
     return res.json({
       success: true,
@@ -171,7 +188,7 @@ export const StorageController = {
       return res.status(400).json({ error: "Le nom du groupe doit comporter au moins 3 caractères." });
     }
 
-    const user = getAuthenticatedUser(req);
+    const user = res.locals.authenticatedUser as ServerUser | undefined;
     if (!user) return res.status(401).json({ error: "Authentification requise." });
     const code = `${(subject || "CS").slice(0, 3).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const newGroup: ServerStudyGroup = {
@@ -227,7 +244,7 @@ export const StorageController = {
       return res.status(404).json({ error: "Aucun groupe d'étude trouvé avec ce code d'invitation." });
     }
 
-    const user = getAuthenticatedUser(req);
+    const user = res.locals.authenticatedUser as ServerUser | undefined;
     if (!user) return res.status(401).json({ error: "Authentification requise." });
     const memberId = user.id;
     const alreadyMember = foundGroup.members.some((m) => m.id === memberId);
@@ -266,7 +283,7 @@ export const StorageController = {
       return res.status(400).json({ error: "Message vide." });
     }
 
-    const user = getAuthenticatedUser(req);
+    const user = res.locals.authenticatedUser as ServerUser | undefined;
     if (!user) return res.status(401).json({ error: "Authentification requise." });
     const newMsg = {
       id: `msg-${Date.now()}`,
@@ -293,7 +310,7 @@ export const StorageController = {
       return res.status(404).json({ error: "Groupe introuvable." });
     }
 
-    const user = getAuthenticatedUser(req);
+    const user = res.locals.authenticatedUser as ServerUser | undefined;
     if (!user) return res.status(401).json({ error: "Authentification requise." });
     const shared = {
       id: `sd-${Date.now()}`,
